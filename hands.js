@@ -1,6 +1,6 @@
 // =========================================================================
-// MySpatialOS — Fase 3 v2: Control Aéreo estilo VisionOS
-// (Clics magnéticos anti-drift, scroll con inercia, sliders, mover/escalar)
+// MySpatialOS — Fase 3 v3: Pellizco 3D Ultra-Fino + Control VisionOS
+// (Cierre real <0.25, soltado mínimo >0.30, scroll con inercia, sliders)
 // =========================================================================
 
 import {
@@ -38,6 +38,10 @@ class OneEuroFilter {
   }
 }
 
+// Umbrales estrictos: toca para hacer clic, abre un milímetro y ya suelta
+const PINCH_ENTER = 0.25;
+const PINCH_RELEASE = 0.30;
+
 const HIT_OFFSETS = [
   [0, 0],
   [14, 0], [-14, 0], [0, 14], [0, -14],
@@ -60,8 +64,6 @@ function createSlot() {
     justPinched: false,
     justReleased: false,
 
-    // Modo actual del pellizco:
-    // "none" | "dragWin" | "resizeWin" | "slider" | "pressOrScroll" | "scroll"
     mode: "none",
     grabWin: null,
     targetEl: null,
@@ -78,7 +80,7 @@ function createSlot() {
     scrollVx: 0,
     scrollVy: 0,
 
-    hoverType: "none", // "none" | "btn" | "close" | "handle" | "slider" | "scroll"
+    hoverType: "none",
     hoverEl: null
   };
 }
@@ -120,12 +122,17 @@ export function initHandControl({
     startPitch: 0
   };
 
-  function resize() {
-    overlayCanvas.width = window.innerWidth;
-    overlayCanvas.height = window.innerHeight;
+  function syncOverlaySize() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    if (overlayCanvas.width !== w || overlayCanvas.height !== h) {
+      overlayCanvas.width = w;
+      overlayCanvas.height = h;
+    }
   }
-  window.addEventListener("resize", resize);
-  resize();
+  window.addEventListener("resize", syncOverlaySize);
+  window.visualViewport?.addEventListener("resize", syncOverlaySize);
+  syncOverlaySize();
 
   function getCoverRect(vw, vh, cw, ch) {
     const vr = vw / vh;
@@ -162,6 +169,7 @@ export function initHandControl({
 
   function resetSlot(s) {
     s.active = false;
+    s.ratio = 1;
     s.pinching = false;
     s.justPinched = false;
     s.justReleased = false;
@@ -199,7 +207,6 @@ export function initHandControl({
     return wins.find((w) => w.el === sec) || null;
   }
 
-  // Hit-test magnético: busca primero en el punto exacto y luego en radio 14px para botones/controles
   function getHitTargets(x, y) {
     const wins = getWindows();
     const centerEls = document.elementsFromPoint(x, y);
@@ -227,12 +234,9 @@ export function initHandControl({
       }
     }
 
-    // Muestreo radial solo si no tocó un control exacto (ayuda mucho en botones pequeños)
     if (!closeBtn && !resizeHandle && !dragHandle && !slider && !interactive) {
       for (let k = 1; k < HIT_OFFSETS.length; k++) {
-        const sx = x + HIT_OFFSETS[k][0];
-        const sy = y + HIT_OFFSETS[k][1];
-        const top = document.elementFromPoint(sx, sy);
+        const top = document.elementFromPoint(x + HIT_OFFSETS[k][0], y + HIT_OFFSETS[k][1]);
         if (!top) continue;
         if (!closeBtn && top.classList?.contains("winCloseBtn")) {
           closeBtn = top;
@@ -274,8 +278,7 @@ export function initHandControl({
     const min = parseFloat(sliderEl.min || "0");
     const max = parseFloat(sliderEl.max || "100");
     const step = parseFloat(sliderEl.step || "1");
-    const raw = min + pct * (max - min);
-    const val = Math.round(raw / step) * step;
+    const val = Math.round((min + pct * (max - min)) / step) * step;
     if (String(val) !== sliderEl.value) {
       sliderEl.value = String(val);
       sliderEl.dispatchEvent(new Event("input", { bubbles: true }));
@@ -295,18 +298,14 @@ export function initHandControl({
     }
 
     ripples.push({
-      x,
-      y,
-      r: 7,
-      maxR: 36,
-      alpha: 0.92,
+      x, y, r: 7, maxR: 36, alpha: 0.92,
       color: isClose ? "248, 113, 113" : "56, 189, 248"
     });
     return true;
   }
 
-  function updateSlots(rawHands, now, rect, mirror) {
-    const rawPinches = rawHands.map((h) => {
+  function updateSlots(rawHands, worldHands, now, rect, mirror) {
+    const rawPinches = rawHands.map((h, idx) => {
       const p0 = mapPoint(h[0], rect, mirror);
       const p4 = mapPoint(h[4], rect, mirror);
       const p5 = mapPoint(h[5], rect, mirror);
@@ -314,19 +313,25 @@ export function initHandControl({
       const p9 = mapPoint(h[9], rect, mirror);
       const p17 = mapPoint(h[17], rect, mirror);
 
-      // Escala estable en 3D aunque inclines la palma
-      const scale = Math.max(
-        Math.hypot(p9.x - p0.x, p9.y - p0.y),
-        Math.hypot(p5.x - p17.x, p5.y - p17.y) * 1.15,
-        24
-      );
-      const dist = Math.hypot(p4.x - p8.x, p4.y - p8.y);
-      const ratio = dist / scale;
+      // Distancia 3D real (inmune al ángulo de la mano) con fallback 2D
+      let ratio;
+      const wh = worldHands[idx];
+      if (wh && wh[0] && wh[4] && wh[8] && wh[9]) {
+        const wScale = Math.hypot(wh[9].x - wh[0].x, wh[9].y - wh[0].y, wh[9].z - wh[0].z) || 0.09;
+        const wDist = Math.hypot(wh[4].x - wh[8].x, wh[4].y - wh[8].y, wh[4].z - wh[8].z);
+        ratio = wDist / wScale;
+      } else {
+        const scale = Math.max(
+          Math.hypot(p9.x - p0.x, p9.y - p0.y),
+          Math.hypot(p5.x - p17.x, p5.y - p17.y) * 1.15,
+          24
+        );
+        ratio = Math.hypot(p4.x - p8.x, p4.y - p8.y) / scale;
+      }
 
-      // Ponderado hacia el índice (70/30) para reducir el salto al cerrar el pulgar
       return {
-        x: p8.x * 0.7 + p4.x * 0.3,
-        y: p8.y * 0.7 + p4.y * 0.3,
+        x: p8.x * 0.72 + p4.x * 0.28,
+        y: p8.y * 0.72 + p4.y * 0.28,
         ratio
       };
     });
@@ -358,17 +363,18 @@ export function initHandControl({
       const rp = assigned[i];
 
       if (rp) {
+        const wasActive = s.active;
         s.active = true;
         s.lastSeen = now;
         s.prevX = s.x;
         s.prevY = s.y;
-        s.ratio = rp.ratio;
+        // Suavizado mínimo de ratio para respuesta instantánea sin parpadeo
+        s.ratio = wasActive ? (s.ratio * 0.28 + rp.ratio * 0.72) : rp.ratio;
 
         const filtX = s.fx.filter(rp.x, now);
         const filtY = s.fy.filter(rp.y, now);
 
-        // Amortiguación anti-drift justo cuando estás cerrando los dedos sobre un botón
-        const closingOnBtn = !s.pinching && rp.ratio < 0.54 && (s.hoverType === "btn" || s.hoverType === "close");
+        const closingOnBtn = !s.pinching && s.ratio < 0.36 && (s.hoverType === "btn" || s.hoverType === "close");
         if (closingOnBtn && s.prevX) {
           s.x = s.prevX + (filtX - s.prevX) * 0.25;
           s.y = s.prevY + (filtY - s.prevY) * 0.25;
@@ -378,14 +384,14 @@ export function initHandControl({
         }
 
         const was = s.pinching;
-        if (!was && rp.ratio < 0.38) {
+        if (!was && s.ratio < PINCH_ENTER) {
           s.pinching = true;
           s.justPinched = true;
-        } else if (was && rp.ratio > 0.54) {
+        } else if (was && s.ratio > PINCH_RELEASE) {
           s.pinching = false;
           s.justReleased = true;
         }
-      } else if (now - s.lastSeen > 180) {
+      } else if (now - s.lastSeen > 150) {
         if (s.pinching) {
           s.pinching = false;
           s.justReleased = true;
@@ -400,7 +406,6 @@ export function initHandControl({
     const wins = getWindows();
     const [h0, h1] = slots;
 
-    // 1. Limpiar ventanas cerradas
     for (const s of slots) {
       if (s.grabWin && !wins.includes(s.grabWin)) {
         s.grabWin = null;
@@ -409,7 +414,6 @@ export function initHandControl({
     }
     if (twoHand.win && !wins.includes(twoHand.win)) twoHand.win = null;
 
-    // 2. Hit-test y actualizar hover visual (estilo VisionOS)
     const hits = slots.map((s) => (s.active ? getHitTargets(s.x, s.y) : null));
     const nextHovered = new Set();
 
@@ -437,7 +441,7 @@ export function initHandControl({
       if (!hoveredEls.has(el)) { el.classList.add("hand-hover"); hoveredEls.add(el); }
     }
 
-    // 3. Doble pinch en la MISMA ventana -> Escalar + Mover con 2 manos
+    // Doble pinch en la misma ventana -> Escalar + Mover
     const busyTwoHand =
       h0.active && h1.active && h0.pinching && h1.pinching &&
       h0.mode !== "slider" && h1.mode !== "slider" &&
@@ -497,7 +501,6 @@ export function initHandControl({
       }
     }
 
-    // 4. Interacción individual por mano (Clics, Scroll, Sliders, Mover, Redimensionar)
     let anyDragging = false;
 
     for (let i = 0; i < 2; i++) {
@@ -506,7 +509,6 @@ export function initHandControl({
       const hit = hits[i];
       if (!s.active && !s.justReleased) continue;
 
-      // A) INICIO DE PELLIZCO
       if (s.justPinched && hit) {
         s.downX = s.x;
         s.downY = s.y;
@@ -533,11 +535,9 @@ export function initHandControl({
           s.startYaw = hit.winObj.yaw;
           s.startPitch = hit.winObj.pitch;
         } else if (hit.interactive && !hit.scrollInfo) {
-          // Botón fuera de zona scrollable (ej. barra superior o calculadora) -> clic instantáneo
           triggerElementClick(hit.interactive, s.x, s.y, now, false);
           s.mode = "done";
         } else if (hit.scrollInfo || hit.interactive) {
-          // Dentro de app scrollable o dock: si arrastras >14px hace scroll; si sueltas quieto hace clic
           s.mode = "pressOrScroll";
           s.targetEl = hit.interactive || null;
           s.scrollInfo = hit.scrollInfo || null;
@@ -548,7 +548,6 @@ export function initHandControl({
         }
       }
 
-      // B) MIENTRAS MANTIENE PELLIZCO
       if (s.pinching) {
         const dx = s.x - s.downX;
         const dy = s.y - s.downY;
@@ -567,9 +566,9 @@ export function initHandControl({
           updateSliderByX(s.targetEl, s.x);
           anyDragging = true;
         } else if (s.mode === "pressOrScroll") {
-          if (s.scrollInfo && Math.hypot(dx, dy) > 14) {
+          if (s.scrollInfo && Math.hypot(dx, dy) > 13) {
             s.mode = "scroll";
-            s.targetEl = null; // Cancela clic porque el usuario quiere deslizar
+            s.targetEl = null;
             s.downX = s.x;
             s.downY = s.y;
             s.startScrollTop = s.scrollInfo.el.scrollTop;
@@ -587,7 +586,6 @@ export function initHandControl({
         }
       }
 
-      // C) AL SOLTAR PELLIZCO
       if (s.justReleased) {
         if (s.mode === "pressOrScroll" && s.targetEl) {
           triggerElementClick(s.targetEl, s.x, s.y, now, false);
@@ -606,7 +604,6 @@ export function initHandControl({
         s.scrollInfo = null;
       }
 
-      // Consumir eventos de flanco (garantiza 1 solo disparo por gesto)
       s.justPinched = false;
       s.justReleased = false;
     }
@@ -628,7 +625,6 @@ export function initHandControl({
   function drawOverlay() {
     ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
-    // Ondas de clic
     for (let i = ripples.length - 1; i >= 0; i--) {
       const rp = ripples[i];
       rp.r += (rp.maxR - rp.r) * 0.25;
@@ -641,12 +637,11 @@ export function initHandControl({
       if (rp.alpha < 0.03) ripples.splice(i, 1);
     }
 
-    // Cursores con feedback progresivo de pellizco
     for (const s of slots) {
       if (!s.active) continue;
 
-      const pinchProg = Math.max(0, Math.min(1, (0.72 - s.ratio) / (0.72 - 0.38)));
-      const outerR = s.pinching ? 7 : 18 - pinchProg * 9;
+      const pinchProg = Math.max(0, Math.min(1, (0.48 - s.ratio) / (0.48 - PINCH_ENTER)));
+      const outerR = s.pinching ? 6.5 : 17 - pinchProg * 8.5;
 
       let fill = "rgba(255, 255, 255, 0.16)";
       let stroke = "rgba(255, 255, 255, 0.85)";
@@ -665,7 +660,6 @@ export function initHandControl({
         stroke = "#38bdf8";
       }
 
-      // Anillo exterior progresivo
       ctx.beginPath();
       ctx.arc(s.x, s.y, outerR, 0, Math.PI * 2);
       ctx.fillStyle = fill;
@@ -674,7 +668,6 @@ export function initHandControl({
       ctx.lineWidth = s.pinching ? 2.2 : 1.6;
       ctx.stroke();
 
-      // Punto central de puntería fina
       if (!s.pinching) {
         ctx.beginPath();
         ctx.arc(s.x, s.y, 2.2, 0, Math.PI * 2);
@@ -687,19 +680,16 @@ export function initHandControl({
   function tick(now) {
     if (!enabled) return;
 
-    if (landmarker && video.readyState >= 2) {
-      if (video.style.display === "none") {
-        video.style.display = "block";
-        video.style.opacity = "0";
-      }
+    syncOverlaySize();
 
+    if (landmarker && video.readyState >= 2 && video.videoWidth > 0) {
       if (video.currentTime !== lastVideoTime) {
         lastVideoTime = video.currentTime;
-        const vw = video.videoWidth || 1280;
-        const vh = video.videoHeight || 720;
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
         const rect = getCoverRect(vw, vh, overlayCanvas.width, overlayCanvas.height);
         const res = landmarker.detectForVideo(getScaledFrame(vw, vh), now);
-        updateSlots(res.landmarks || [], now, rect, getMirror());
+        updateSlots(res.landmarks || [], res.worldLandmarks || [], now, rect, getMirror());
         processInteractions(now);
       }
 
@@ -759,10 +749,6 @@ export function initHandControl({
       resetAllSlots();
       ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
       overlayCanvas.style.display = "none";
-      if (video.style.opacity === "0") {
-        video.style.opacity = "";
-        video.style.display = "none";
-      }
       toggleBtn.textContent = "MANOS: OFF";
       toggleBtn.classList.remove("active");
     }
