@@ -1,3 +1,4 @@
+import { registerExtraApps } from "./apps.js";
 // =========================================================================
 // MySpatialOS — Fase 1: Motor 360° (3DoF) + Gestor de Ventanas + Temas
 // =========================================================================
@@ -365,6 +366,7 @@ const APPS = {
   }
 };
 
+registerExtraApps(APPS, createWindow);
 bgFileInput.addEventListener("change", (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
