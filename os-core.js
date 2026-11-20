@@ -1,7 +1,9 @@
-import { registerExtraApps } from "./apps.js";
 // =========================================================================
-// MySpatialOS — Fase 1: Motor 360° (3DoF) + Gestor de Ventanas + Temas
+// MySpatialOS — Fase 3: Motor 360° + Gestor de Ventanas + Apps + Manos
 // =========================================================================
+
+import { registerExtraApps } from "./apps.js?v=3";
+import { initHandControl } from "./hands.js?v=3";
 
 const bootScreen = document.getElementById("bootScreen");
 const bootBtn = document.getElementById("bootBtn");
@@ -10,11 +12,13 @@ const bgVideo = document.getElementById("bgVideo");
 const bgCustom = document.getElementById("bgCustom");
 const bgGrid = document.getElementById("bgGrid");
 const stage = document.getElementById("spatialStage");
+const handOverlay = document.getElementById("handOverlay");
 const topBar = document.getElementById("topBar");
 const sysMetrics = document.getElementById("sysMetrics");
 const dock = document.getElementById("dock");
 const recenterBtn = document.getElementById("recenterBtn");
 const gyroBtn = document.getElementById("gyroBtn");
+const handsBtn = document.getElementById("handsBtn");
 const hideUiBtn = document.getElementById("hideUiBtn");
 const restoreUiBtn = document.getElementById("restoreUiBtn");
 const camSwitchBtn = document.getElementById("camSwitchBtn");
@@ -56,7 +60,14 @@ function applyTheme() {
   root.setProperty("--win-radius", `${theme.radius}px`);
   root.setProperty("--dock-bottom", `${theme.dockBottom}px`);
 
-  bgVideo.style.display = theme.bgMode === "camera" ? "block" : "none";
+  if (theme.bgMode === "camera") {
+    bgVideo.style.display = "block";
+    bgVideo.style.opacity = "1";
+  } else {
+    bgVideo.style.opacity = "";
+    bgVideo.style.display = "none";
+  }
+
   bgGrid.style.display = theme.bgMode === "grid" ? "block" : "none";
   bgCustom.style.display = theme.bgMode === "custom" ? "block" : "none";
   if (theme.customBgUrl) {
@@ -367,6 +378,18 @@ const APPS = {
 };
 
 registerExtraApps(APPS, createWindow);
+
+initHandControl({
+  video: bgVideo,
+  overlayCanvas: handOverlay,
+  toggleBtn: handsBtn,
+  getMirror: () => facingMode === "user",
+  getWindows: () => windows,
+  focusWindow,
+  wrapDeg,
+  pxPerDeg: PX_PER_DEG
+});
+
 bgFileInput.addEventListener("change", (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
