@@ -6,7 +6,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>MySpatialOS — VisionOS Grade</title>
-  <link rel="stylesheet" href="./style.css?v=4" />
+  <link rel="stylesheet" href="./style.css?v=5" />
 </head>
 <body>
   <div id="bootScreen">
@@ -16,7 +16,9 @@
     <div id="bootStatus">Pulsa para activar cámara y giroscopio 360°.</div>
   </div>
 
+  <!-- Video oculto permanente para que Safari nunca cierre el decodificador -->
   <video id="bgVideo" playsinline webkit-playsinline autoplay muted></video>
+  <canvas id="bgCanvas"></canvas>
   <div id="bgCustom"></div>
   <div id="bgGrid"></div>
 
@@ -49,6 +51,6 @@
 
   <input type="file" id="bgFileInput" accept="image/*" hidden />
 
-  <script type="module" src="./os-core.js?v=4"></script>
+  <script type="module" src="./os-core.js?v=5"></script>
 </body>
 </html>
