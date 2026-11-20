@@ -1,9 +1,9 @@
 // =========================================================================
-// MySpatialOS — Fase 3 v3: Motor 360° + Cámara Canvas Anti-Bug + Apps + Manos
+// MySpatialOS — Fase 3 v4: Motor 360° + Cámara Canvas Anti-Bug + Apps + Manos
 // =========================================================================
 
 import { registerExtraApps } from "./apps.js?v=5";
-import { initHandControl } from "./hands.js?v=5";
+import { initHandControl } from "./hands.js?v=6";
 
 const bootScreen = document.getElementById("bootScreen");
 const bootBtn = document.getElementById("bootBtn");
@@ -62,7 +62,6 @@ function applyTheme() {
   root.setProperty("--win-radius", `${theme.radius}px`);
   root.setProperty("--dock-bottom", `${theme.dockBottom}px`);
 
-  // Solo ocultamos el canvas visual; bgVideo sigue vivo para MediaPipe
   bgCanvas.style.display = theme.bgMode === "camera" ? "block" : "none";
   bgGrid.style.display = theme.bgMode === "grid" ? "block" : "none";
   bgCustom.style.display = theme.bgMode === "custom" ? "block" : "none";
@@ -73,7 +72,6 @@ function applyTheme() {
   localStorage.setItem("spatialos_theme", JSON.stringify(theme));
 }
 
-// --- Cámara en Canvas (elimina bordes negros y cortes de Safari iOS) ---
 let facingMode = "environment";
 let currentStream = null;
 let cameraStarting = false;
@@ -138,7 +136,6 @@ async function startCamera() {
   }
 }
 
-// Watchdog: si Safari pausa el vídeo tras abrir PDF/Fotos o cambiar de app, lo levanta solo
 function checkCameraHealth(now) {
   if (cameraStarting || document.hidden || now - lastCamCheck < 1200) return;
   lastCamCheck = now;
