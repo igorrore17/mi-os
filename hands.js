@@ -1,6 +1,5 @@
 // =========================================================================
-// MySpatialOS — Fase 3 v3: Pellizco 3D Ultra-Fino + Control VisionOS
-// (Cierre real <0.25, soltado mínimo >0.30, scroll con inercia, sliders)
+// MySpatialOS — Fase 3 v4: Pellizco 2D Estable + Anti-Rebote (2 frames)
 // =========================================================================
 
 import {
@@ -38,9 +37,11 @@ class OneEuroFilter {
   }
 }
 
-// Umbrales estrictos: toca para hacer clic, abre un milímetro y ya suelta
-const PINCH_ENTER = 0.25;
-const PINCH_RELEASE = 0.30;
+// Punto medio calibrado en 2D: cierra al tocar, suelta al abrir ~1.5 cm, sin rebote
+const PINCH_ENTER = 0.31;
+const PINCH_RELEASE = 0.40;
+const CONFIRM_FRAMES = 2;
+const CLICK_COOLDOWN_MS = 360;
 
 const HIT_OFFSETS = [
   [0, 0],
@@ -63,6 +64,9 @@ function createSlot() {
     pinching: false,
     justPinched: false,
     justReleased: false,
+    enterStreak: 0,
+    exitStreak: 0,
+    lastClickAt: 0,
 
     mode: "none",
     grabWin: null,
@@ -104,7 +108,6 @@ export function initHandControl({
   let enabled = false;
   let rafId = null;
   let lastVideoTime = -1;
-  let lastClickAt = 0;
 
   const slots = [createSlot(), createSlot()];
   const ripples = [];
@@ -173,6 +176,8 @@ export function initHandControl({
     s.pinching = false;
     s.justPinched = false;
     s.justReleased = false;
+    s.enterStreak = 0;
+    s.exitStreak = 0;
     s.mode = "none";
     s.grabWin = null;
     s.targetEl = null;
@@ -285,10 +290,10 @@ export function initHandControl({
     }
   }
 
-  function triggerElementClick(el, x, y, now, isClose = false) {
+  function triggerElementClick(slot, el, x, y, now, isClose = false) {
     if (!el || el === toggleBtn) return false;
-    if (now - lastClickAt < 200) return false;
-    lastClickAt = now;
+    if (now - slot.lastClickAt < CLICK_COOLDOWN_MS) return false;
+    slot.lastClickAt = now;
 
     if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT") {
       el.focus();
@@ -304,8 +309,8 @@ export function initHandControl({
     return true;
   }
 
-  function updateSlots(rawHands, worldHands, now, rect, mirror) {
-    const rawPinches = rawHands.map((h, idx) => {
+  function updateSlots(rawHands, now, rect, mirror) {
+    const rawPinches = rawHands.map((h) => {
       const p0 = mapPoint(h[0], rect, mirror);
       const p4 = mapPoint(h[4], rect, mirror);
       const p5 = mapPoint(h[5], rect, mirror);
@@ -313,21 +318,13 @@ export function initHandControl({
       const p9 = mapPoint(h[9], rect, mirror);
       const p17 = mapPoint(h[17], rect, mirror);
 
-      // Distancia 3D real (inmune al ángulo de la mano) con fallback 2D
-      let ratio;
-      const wh = worldHands[idx];
-      if (wh && wh[0] && wh[4] && wh[8] && wh[9]) {
-        const wScale = Math.hypot(wh[9].x - wh[0].x, wh[9].y - wh[0].y, wh[9].z - wh[0].z) || 0.09;
-        const wDist = Math.hypot(wh[4].x - wh[8].x, wh[4].y - wh[8].y, wh[4].z - wh[8].z);
-        ratio = wDist / wScale;
-      } else {
-        const scale = Math.max(
-          Math.hypot(p9.x - p0.x, p9.y - p0.y),
-          Math.hypot(p5.x - p17.x, p5.y - p17.y) * 1.15,
-          24
-        );
-        ratio = Math.hypot(p4.x - p8.x, p4.y - p8.y) / scale;
-      }
+      // Distancia 2D normalizada: sin el error Z monocular que bloqueaba pellizcos
+      const scale = Math.max(
+        Math.hypot(p9.x - p0.x, p9.y - p0.y),
+        Math.hypot(p5.x - p17.x, p5.y - p17.y) * 1.15,
+        26
+      );
+      const ratio = Math.hypot(p4.x - p8.x, p4.y - p8.y) / scale;
 
       return {
         x: p8.x * 0.72 + p4.x * 0.28,
@@ -368,36 +365,49 @@ export function initHandControl({
         s.lastSeen = now;
         s.prevX = s.x;
         s.prevY = s.y;
-        // Suavizado mínimo de ratio para respuesta instantánea sin parpadeo
-        s.ratio = wasActive ? (s.ratio * 0.28 + rp.ratio * 0.72) : rp.ratio;
+        s.ratio = wasActive ? (s.ratio * 0.35 + rp.ratio * 0.65) : rp.ratio;
 
         const filtX = s.fx.filter(rp.x, now);
         const filtY = s.fy.filter(rp.y, now);
 
-        const closingOnBtn = !s.pinching && s.ratio < 0.36 && (s.hoverType === "btn" || s.hoverType === "close");
+        const closingOnBtn = !s.pinching && s.ratio < 0.44 && (s.hoverType === "btn" || s.hoverType === "close");
         if (closingOnBtn && s.prevX) {
-          s.x = s.prevX + (filtX - s.prevX) * 0.25;
-          s.y = s.prevY + (filtY - s.prevY) * 0.25;
+          s.x = s.prevX + (filtX - s.prevX) * 0.22;
+          s.y = s.prevY + (filtY - s.prevY) * 0.22;
         } else {
           s.x = filtX;
           s.y = filtY;
         }
 
-        const was = s.pinching;
-        if (!was && s.ratio < PINCH_ENTER) {
-          s.pinching = true;
-          s.justPinched = true;
-        } else if (was && s.ratio > PINCH_RELEASE) {
-          s.pinching = false;
-          s.justReleased = true;
-        }
-      } else if (now - s.lastSeen > 150) {
-        if (s.pinching) {
-          s.pinching = false;
-          s.justReleased = true;
+        // Confirmación de 2 frames seguidos para eliminar rebotes y dobles clics
+        if (!s.pinching) {
+          s.exitStreak = 0;
+          if (s.ratio < PINCH_ENTER) {
+            s.enterStreak++;
+            if (s.enterStreak >= CONFIRM_FRAMES) {
+              s.pinching = true;
+              s.justPinched = true;
+              s.enterStreak = 0;
+            }
+          } else {
+            s.enterStreak = 0;
+          }
         } else {
-          resetSlot(s);
+          s.enterStreak = 0;
+          if (s.ratio > PINCH_RELEASE) {
+            s.exitStreak++;
+            if (s.exitStreak >= CONFIRM_FRAMES) {
+              s.pinching = false;
+              s.justReleased = true;
+              s.exitStreak = 0;
+            }
+          } else {
+            s.exitStreak = 0;
+          }
         }
+      } else if (now - s.lastSeen > 180) {
+        // Cancelar limpio al perder la mano (nunca disparar clic fantasma)
+        resetSlot(s);
       }
     }
   }
@@ -518,7 +528,7 @@ export function initHandControl({
         if (hit.winObj) focusWindow(hit.winObj);
 
         if (hit.closeBtn) {
-          triggerElementClick(hit.closeBtn, s.x, s.y, now, true);
+          triggerElementClick(s, hit.closeBtn, s.x, s.y, now, true);
           s.mode = "done";
         } else if (hit.slider) {
           s.mode = "slider";
@@ -535,7 +545,7 @@ export function initHandControl({
           s.startYaw = hit.winObj.yaw;
           s.startPitch = hit.winObj.pitch;
         } else if (hit.interactive && !hit.scrollInfo) {
-          triggerElementClick(hit.interactive, s.x, s.y, now, false);
+          triggerElementClick(s, hit.interactive, s.x, s.y, now, false);
           s.mode = "done";
         } else if (hit.scrollInfo || hit.interactive) {
           s.mode = "pressOrScroll";
@@ -566,7 +576,7 @@ export function initHandControl({
           updateSliderByX(s.targetEl, s.x);
           anyDragging = true;
         } else if (s.mode === "pressOrScroll") {
-          if (s.scrollInfo && Math.hypot(dx, dy) > 13) {
+          if (s.scrollInfo && Math.hypot(dx, dy) > 18) {
             s.mode = "scroll";
             s.targetEl = null;
             s.downX = s.x;
@@ -588,7 +598,7 @@ export function initHandControl({
 
       if (s.justReleased) {
         if (s.mode === "pressOrScroll" && s.targetEl) {
-          triggerElementClick(s.targetEl, s.x, s.y, now, false);
+          triggerElementClick(s, s.targetEl, s.x, s.y, now, false);
         } else if (s.mode === "scroll" && s.scrollInfo) {
           if (Math.hypot(s.scrollVx, s.scrollVy) > 1.2) {
             inertia.push({
@@ -640,7 +650,7 @@ export function initHandControl({
     for (const s of slots) {
       if (!s.active) continue;
 
-      const pinchProg = Math.max(0, Math.min(1, (0.48 - s.ratio) / (0.48 - PINCH_ENTER)));
+      const pinchProg = Math.max(0, Math.min(1, (0.58 - s.ratio) / (0.58 - PINCH_ENTER)));
       const outerR = s.pinching ? 6.5 : 17 - pinchProg * 8.5;
 
       let fill = "rgba(255, 255, 255, 0.16)";
@@ -689,7 +699,7 @@ export function initHandControl({
         const vh = video.videoHeight;
         const rect = getCoverRect(vw, vh, overlayCanvas.width, overlayCanvas.height);
         const res = landmarker.detectForVideo(getScaledFrame(vw, vh), now);
-        updateSlots(res.landmarks || [], res.worldLandmarks || [], now, rect, getMirror());
+        updateSlots(res.landmarks || [], now, rect, getMirror());
         processInteractions(now);
       }
 
