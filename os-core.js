@@ -1,9 +1,9 @@
 // =========================================================================
-// MySpatialOS — Fase 3: Motor 360° + Gestor de Ventanas + Apps + Manos
+// MySpatialOS — Fase 3 v2: Motor 360° + Gestor de Ventanas + Apps + Manos
 // =========================================================================
 
-import { registerExtraApps } from "./apps.js?v=3";
-import { initHandControl } from "./hands.js?v=3";
+import { registerExtraApps } from "./apps.js?v=4";
+import { initHandControl } from "./hands.js?v=4";
 
 const bootScreen = document.getElementById("bootScreen");
 const bootBtn = document.getElementById("bootBtn");
@@ -28,7 +28,7 @@ const DEFAULT_THEME = {
   accent: "#38bdf8",
   glassHex: "#141822",
   glassAlpha: 0.52,
-  glassBlur: 16,
+  glassBlur: 18,
   radius: 22,
   dockBottom: 92,
   bgMode: "camera",
@@ -179,12 +179,15 @@ function focusWindow(win) {
   for (const w of windows) w.el.classList.toggle("focused", w.id === win.id);
 }
 
-function createWindow({ title, appId, w = 270, h = 230, yawOffset = 0, pitchOffset = 0, buildContent }) {
+function createWindow({ title, appId, w = 280, h = 240, yawOffset = 0, pitchOffset = 0, buildContent }) {
   const id = nextWinId++;
+  const clampedW = Math.min(window.innerWidth * 0.9, Math.max(210, w));
+  const clampedH = Math.min(window.innerHeight * 0.68, Math.max(150, h));
+
   const el = document.createElement("section");
   el.className = "spWin";
-  el.style.width = `${w}px`;
-  el.style.height = `${h}px`;
+  el.style.width = `${clampedW}px`;
+  el.style.height = `${clampedH}px`;
 
   el.innerHTML = `
     <div class="winHeader">
@@ -203,7 +206,9 @@ function createWindow({ title, appId, w = 270, h = 230, yawOffset = 0, pitchOffs
     id, appId, el,
     yaw: wrapDeg(cam.yaw + yawOffset),
     pitch: Math.max(-65, Math.min(65, cam.pitch + pitchOffset)),
-    w, h, cleanup: null
+    w: clampedW,
+    h: clampedH,
+    cleanup: null
   };
 
   const body = el.querySelector(".winBody");
@@ -225,6 +230,7 @@ function createWindow({ title, appId, w = 270, h = 230, yawOffset = 0, pitchOffs
       e.stopPropagation();
       focusWindow(win);
       dragging = true;
+      document.body.classList.add("touch-dragging");
       sx = e.clientX; sy = e.clientY;
       startYaw = win.yaw; startPitch = win.pitch;
       handleEl.setPointerCapture(e.pointerId);
@@ -234,7 +240,13 @@ function createWindow({ title, appId, w = 270, h = 230, yawOffset = 0, pitchOffs
       win.yaw = wrapDeg(startYaw + (e.clientX - sx) / PX_PER_DEG);
       win.pitch = Math.max(-70, Math.min(70, startPitch - (e.clientY - sy) / PX_PER_DEG));
     });
-    handleEl.addEventListener("pointerup", () => { dragging = false; });
+    const endDrag = () => {
+      if (!dragging) return;
+      dragging = false;
+      document.body.classList.remove("touch-dragging");
+    };
+    handleEl.addEventListener("pointerup", endDrag);
+    handleEl.addEventListener("pointercancel", endDrag);
   };
   attachDrag(el.querySelector(".winHeader"));
   attachDrag(el.querySelector(".winDragPill"));
@@ -245,18 +257,25 @@ function createWindow({ title, appId, w = 270, h = 230, yawOffset = 0, pitchOffs
     e.stopPropagation();
     focusWindow(win);
     resizing = true;
+    document.body.classList.add("touch-dragging");
     rx = e.clientX; ry = e.clientY;
     rw = win.w; rh = win.h;
     resizer.setPointerCapture(e.pointerId);
   });
   resizer.addEventListener("pointermove", (e) => {
     if (!resizing) return;
-    win.w = Math.max(190, Math.min(window.innerWidth * 0.92, rw + (e.clientX - rx)));
-    win.h = Math.max(130, Math.min(window.innerHeight * 0.72, rh + (e.clientY - ry)));
+    win.w = Math.max(210, Math.min(window.innerWidth * 0.94, rw + (e.clientX - rx)));
+    win.h = Math.max(150, Math.min(window.innerHeight * 0.76, rh + (e.clientY - ry)));
     el.style.width = `${win.w}px`;
     el.style.height = `${win.h}px`;
   });
-  resizer.addEventListener("pointerup", () => { resizing = false; });
+  const endResize = () => {
+    if (!resizing) return;
+    resizing = false;
+    document.body.classList.remove("touch-dragging");
+  };
+  resizer.addEventListener("pointerup", endResize);
+  resizer.addEventListener("pointercancel", endResize);
 
   stage.appendChild(el);
   windows.push(win);
@@ -269,8 +288,8 @@ const APPS = {
     createWindow({
       title: "Apuntes",
       appId: "notes",
-      w: 270,
-      h: 220,
+      w: 280,
+      h: 230,
       buildContent(body) {
         const ta = document.createElement("textarea");
         ta.className = "noteArea";
@@ -286,8 +305,8 @@ const APPS = {
     createWindow({
       title: "Reloj Espacial",
       appId: "clock",
-      w: 230,
-      h: 140,
+      w: 235,
+      h: 155,
       buildContent(body) {
         body.innerHTML = `<div class="clockBig">--:--</div><div class="clockDate">---</div>`;
         const big = body.querySelector(".clockBig");
@@ -308,8 +327,8 @@ const APPS = {
     createWindow({
       title: "Personalizar OS",
       appId: "themes",
-      w: 285,
-      h: 315,
+      w: 290,
+      h: 325,
       buildContent(body) {
         body.innerHTML = `
           <div class="cfgGroup">
