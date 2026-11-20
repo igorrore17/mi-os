@@ -104,6 +104,16 @@ html, body {
   overflow: hidden;
 }
 
+#handOverlay {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  z-index: 60;
+  pointer-events: none;
+  display: none;
+}
+
 .spWin {
   position: absolute;
   left: 0;
@@ -196,27 +206,29 @@ html, body {
 #topBar {
   position: fixed;
   top: calc(env(safe-area-inset-top) + 8px);
-  left: 12px;
-  right: 12px;
+  left: 10px;
+  right: 10px;
   z-index: 40;
   display: none;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
+  gap: 6px;
   pointer-events: none;
 }
 #sysMetrics {
   background: rgba(0, 0, 0, 0.52);
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 10px;
-  padding: 6px 10px;
-  font-size: 11px;
+  padding: 6px 9px;
+  font-size: 10px;
   font-family: ui-monospace, Menlo, monospace;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
 }
 .topActions {
   display: flex;
-  gap: 6px;
+  gap: 5px;
   pointer-events: auto;
 }
 .pillBtn {
@@ -224,8 +236,8 @@ html, body {
   color: #fff;
   border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 10px;
-  padding: 7px 10px;
-  font-size: 11px;
+  padding: 7px 8px;
+  font-size: 10px;
   font-weight: 700;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -345,7 +357,8 @@ html, body {
   font-weight: 700;
 }
 .miniBtn.active { background: var(--accent); color: #000; border-color: var(--accent); }
-/* --- Apps Fase 2 (Chat IA, Apuntes, YouTube, Visor, Calc) --- */
+
+/* --- Apps Fase 2 --- */
 .appToolbar {
   display: flex;
   align-items: center;
@@ -379,7 +392,6 @@ html, body {
   height: calc(100% - 76px);
 }
 
-/* Chat IA */
 .aiWrap {
   display: flex;
   flex-direction: column;
@@ -435,7 +447,6 @@ html, body {
   gap: 6px;
 }
 
-/* YouTube y Visor PDF/Foto */
 .ytFrameWrap, .vStage {
   width: 100%;
   height: calc(100% - 38px);
@@ -464,7 +475,6 @@ html, body {
   padding: 16px;
 }
 
-/* Calculadora */
 .calcScreen {
   background: rgba(0, 0, 0, 0.4);
   border: 1px solid rgba(255, 255, 255, 0.14);
