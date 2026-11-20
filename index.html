@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>MySpatialOS — Fase 1</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div id="bootScreen">
+    <div class="bootLogo">SPATIAL OS</div>
+    <p class="bootSub">Fase 1 · Espacio 360° + Temas + Ventanas</p>
+    <button id="bootBtn">INICIAR SISTEMA</button>
+    <div id="bootStatus">Pulsa para activar cámara y giroscopio 360°.</div>
+  </div>
+
+  <video id="bgVideo" playsinline webkit-playsinline autoplay muted></video>
+  <div id="bgCustom"></div>
+  <div id="bgGrid"></div>
+
+  <div id="spatialStage"></div>
+
+  <header id="topBar">
+    <div id="sysMetrics">360°: OFF</div>
+    <div class="topActions">
+      <button class="pillBtn" id="recenterBtn">CENTRAR</button>
+      <button class="pillBtn" id="gyroBtn">GIRO: ON</button>
+      <button class="pillBtn" id="hideUiBtn">UI</button>
+    </div>
+  </header>
+
+  <button id="restoreUiBtn">MOSTRAR UI</button>
+
+  <nav id="dock">
+    <button class="dockBtn" data-app="notes">NOTAS</button>
+    <button class="dockBtn" data-app="clock">RELOJ</button>
+    <button class="dockBtn" data-app="themes">TEMAS</button>
+    <button class="dockBtn" id="camSwitchBtn">CAM: BACK</button>
+  </nav>
+
+  <input type="file" id="bgFileInput" accept="image/*" hidden />
+
+  <script type="module" src="./os-core.js"></script>
+</body>
+</html>
