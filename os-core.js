@@ -1,14 +1,16 @@
 // =========================================================================
-// MySpatialOS — Fase 3 v2: Motor 360° + Gestor de Ventanas + Apps + Manos
+// MySpatialOS — Fase 3 v3: Motor 360° + Cámara Canvas Anti-Bug + Apps + Manos
 // =========================================================================
 
-import { registerExtraApps } from "./apps.js?v=4";
-import { initHandControl } from "./hands.js?v=4";
+import { registerExtraApps } from "./apps.js?v=5";
+import { initHandControl } from "./hands.js?v=5";
 
 const bootScreen = document.getElementById("bootScreen");
 const bootBtn = document.getElementById("bootBtn");
 const bootStatus = document.getElementById("bootStatus");
 const bgVideo = document.getElementById("bgVideo");
+const bgCanvas = document.getElementById("bgCanvas");
+const bgCtx = bgCanvas.getContext("2d", { alpha: false });
 const bgCustom = document.getElementById("bgCustom");
 const bgGrid = document.getElementById("bgGrid");
 const stage = document.getElementById("spatialStage");
@@ -60,14 +62,8 @@ function applyTheme() {
   root.setProperty("--win-radius", `${theme.radius}px`);
   root.setProperty("--dock-bottom", `${theme.dockBottom}px`);
 
-  if (theme.bgMode === "camera") {
-    bgVideo.style.display = "block";
-    bgVideo.style.opacity = "1";
-  } else {
-    bgVideo.style.opacity = "";
-    bgVideo.style.display = "none";
-  }
-
+  // Solo ocultamos el canvas visual; bgVideo sigue vivo para MediaPipe
+  bgCanvas.style.display = theme.bgMode === "camera" ? "block" : "none";
   bgGrid.style.display = theme.bgMode === "grid" ? "block" : "none";
   bgCustom.style.display = theme.bgMode === "custom" ? "block" : "none";
   if (theme.customBgUrl) {
@@ -77,30 +73,120 @@ function applyTheme() {
   localStorage.setItem("spatialos_theme", JSON.stringify(theme));
 }
 
+// --- Cámara en Canvas (elimina bordes negros y cortes de Safari iOS) ---
 let facingMode = "environment";
 let currentStream = null;
+let cameraStarting = false;
+let lastCamCheck = 0;
+let lastViewW = 0;
+let lastViewH = 0;
+
+function syncBgCanvasSize() {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  if (vw === lastViewW && vh === lastViewH && bgCanvas.width > 0) return;
+  lastViewW = vw;
+  lastViewH = vh;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  bgCanvas.width = Math.max(1, Math.round(vw * dpr));
+  bgCanvas.height = Math.max(1, Math.round(vh * dpr));
+}
+
+window.addEventListener("resize", syncBgCanvasSize);
+window.visualViewport?.addEventListener("resize", syncBgCanvasSize);
+syncBgCanvasSize();
 
 async function startCamera() {
-  if (currentStream) currentStream.getTracks().forEach((t) => t.stop());
+  if (cameraStarting) return;
+  cameraStarting = true;
+
+  if (currentStream) {
+    currentStream.getTracks().forEach((t) => {
+      t.onended = null;
+      t.stop();
+    });
+    currentStream = null;
+  }
+
   try {
     currentStream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: { ideal: facingMode },
         width: { ideal: 1280 },
         height: { ideal: 720 },
-        frameRate: { ideal: 60, min: 30 }
+        frameRate: { ideal: 60 }
       },
       audio: false
     });
+
+    const track = currentStream.getVideoTracks()[0];
+    if (track) {
+      track.onended = () => {
+        if (!document.hidden && !cameraStarting) startCamera();
+      };
+    }
+
     bgVideo.srcObject = currentStream;
-    bgVideo.classList.toggle("mirror", facingMode === "user");
     await bgVideo.play();
     camSwitchBtn.textContent = facingMode === "environment" ? "CAM: BACK" : "CAM: FRONT";
   } catch (err) {
     bootStatus.textContent = `Cámara no disponible (${err.message}). Usando modo rejilla.`;
     theme.bgMode = "grid";
     applyTheme();
+  } finally {
+    cameraStarting = false;
   }
+}
+
+// Watchdog: si Safari pausa el vídeo tras abrir PDF/Fotos o cambiar de app, lo levanta solo
+function checkCameraHealth(now) {
+  if (cameraStarting || document.hidden || now - lastCamCheck < 1200) return;
+  lastCamCheck = now;
+  if (!currentStream) return;
+  const track = currentStream.getVideoTracks()[0];
+  if (!track || track.readyState === "ended") {
+    startCamera();
+  } else if (bgVideo.paused) {
+    bgVideo.play().catch(() => {});
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && bootScreen.style.display === "none") {
+    lastCamCheck = 0;
+    checkCameraHealth(performance.now());
+  }
+});
+
+function drawCameraBackground() {
+  if (theme.bgMode !== "camera") return;
+  syncBgCanvasSize();
+
+  if (bgVideo.readyState < 2 || bgVideo.videoWidth === 0) return;
+
+  const cw = bgCanvas.width;
+  const ch = bgCanvas.height;
+  const vw = bgVideo.videoWidth;
+  const vh = bgVideo.videoHeight;
+  const vr = vw / vh;
+  const cr = cw / ch;
+
+  let dw, dh, dx, dy;
+  if (cr > vr) {
+    dw = cw; dh = cw / vr; dx = 0; dy = (ch - dh) * 0.5;
+  } else {
+    dh = ch; dw = ch * vr; dx = (cw - dw) * 0.5; dy = 0;
+  }
+
+  bgCtx.save();
+  if (facingMode === "user") {
+    bgCtx.translate(cw, 0);
+    bgCtx.scale(-1, 1);
+    bgCtx.drawImage(bgVideo, cw - dx - dw, dy, dw, dh);
+  } else {
+    bgCtx.drawImage(bgVideo, dx, dy, dw, dh);
+  }
+  bgCtx.restore();
 }
 
 const PX_PER_DEG = 8.2;
@@ -451,7 +537,10 @@ function setUiHidden(hidden) {
 hideUiBtn.addEventListener("click", () => setUiHidden(true));
 restoreUiBtn.addEventListener("click", () => setUiHidden(false));
 
-function renderLoop() {
+function renderLoop(now) {
+  drawCameraBackground();
+  checkCameraHealth(now);
+
   const targetYaw = (cam.gyroEnabled && cam.hasGyroData)
     ? wrapDeg(cam.rawYaw - cam.zeroYaw + cam.manualYaw)
     : cam.manualYaw;
