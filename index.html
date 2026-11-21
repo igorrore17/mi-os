@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>MySpatialOS — VisionOS Grade</title>
-  <link rel="stylesheet" href="./style.css?v=5" />
+  <title>MySpatialOS — Fase 4</title>
+  <link rel="stylesheet" href="./style.css?v=7" />
 </head>
 <body>
   <div id="bootScreen">
     <div class="bootLogo">SPATIAL OS</div>
-    <p class="bootSub">360° + Apps Adaptables + Control Aéreo</p>
+    <p class="bootSub">360° + Apps + Control Aéreo + AR Lab</p>
     <button id="bootBtn">INICIAR SISTEMA</button>
     <div id="bootStatus">Pulsa para activar cámara y giroscopio 360°.</div>
   </div>
@@ -37,6 +37,7 @@
   <button id="restoreUiBtn">MOSTRAR UI</button>
 
   <nav id="dock">
+    <button class="dockBtn" data-app="ar">AR</button>
     <button class="dockBtn" data-app="ai">IA</button>
     <button class="dockBtn" data-app="notes">NOTAS</button>
     <button class="dockBtn" data-app="youtube">YT</button>
@@ -50,6 +51,6 @@
 
   <input type="file" id="bgFileInput" accept="image/*" hidden />
 
-  <script type="module" src="./os-core.js?v=6"></script>
+  <script type="module" src="./os-core.js?v=7"></script>
 </body>
 </html>
