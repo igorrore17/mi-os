@@ -74,7 +74,6 @@ body.hand-dragging iframe {
   max-width: 300px;
 }
 
-/* El <video> nunca usa display:none para que Safari iOS no lo pause ni corte */
 #bgVideo {
   position: fixed;
   top: 0;
@@ -130,7 +129,6 @@ body.hand-dragging iframe {
   display: none;
 }
 
-/* --- Ventanas estilo VisionOS --- */
 .spWin {
   position: absolute;
   left: 0;
@@ -623,4 +621,17 @@ textarea.hand-hover {
   background: var(--accent);
   color: #000;
   border-color: var(--accent);
+}
+
+.arStatusBox {
+  margin-top: auto;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.36);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--accent);
+  font-weight: 600;
 }
