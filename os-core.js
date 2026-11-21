@@ -1,9 +1,10 @@
 // =========================================================================
-// MySpatialOS — Fase 3 v4: Motor 360° + Cámara Canvas Anti-Bug + Apps + Manos
+// MySpatialOS — Fase 4: Motor 360° + Cámara Canvas + Apps + Manos + AR Lab
 // =========================================================================
 
 import { registerExtraApps } from "./apps.js?v=5";
-import { initHandControl } from "./hands.js?v=6";
+import { initHandControl } from "./hands.js?v=7";
+import { createARModules } from "./ar-modules.js?v=7";
 
 const bootScreen = document.getElementById("bootScreen");
 const bootBtn = document.getElementById("bootBtn");
@@ -481,7 +482,7 @@ const APPS = {
 
 registerExtraApps(APPS, createWindow);
 
-initHandControl({
+const handControl = initHandControl({
   video: bgVideo,
   overlayCanvas: handOverlay,
   toggleBtn: handsBtn,
@@ -491,6 +492,13 @@ initHandControl({
   wrapDeg,
   pxPerDeg: PX_PER_DEG
 });
+
+const arEngine = createARModules({
+  APPS,
+  createWindow,
+  ensureHandsEnabled: () => handControl.ensureEnabled()
+});
+handControl.setAREngine(arEngine);
 
 bgFileInput.addEventListener("change", (e) => {
   const file = e.target.files?.[0];
