@@ -1,5 +1,5 @@
 // =========================================================================
-// MySpatialOS — Fase 3 v4: Pellizco 2D Estable + Anti-Rebote (2 frames)
+// MySpatialOS — Fase 4: Control Aéreo + Puente Compartido para Módulos AR
 // =========================================================================
 
 import {
@@ -37,7 +37,6 @@ class OneEuroFilter {
   }
 }
 
-// Punto medio calibrado en 2D: cierra al tocar, suelta al abrir ~1.5 cm, sin rebote
 const PINCH_ENTER = 0.31;
 const PINCH_RELEASE = 0.40;
 const CONFIRM_FRAMES = 2;
@@ -108,6 +107,8 @@ export function initHandControl({
   let enabled = false;
   let rafId = null;
   let lastVideoTime = -1;
+  let arEngine = null;
+  let lastMappedHands = [];
 
   const slots = [createSlot(), createSlot()];
   const ripples = [];
@@ -309,16 +310,9 @@ export function initHandControl({
     return true;
   }
 
-  function updateSlots(rawHands, now, rect, mirror) {
-    const rawPinches = rawHands.map((h) => {
-      const p0 = mapPoint(h[0], rect, mirror);
-      const p4 = mapPoint(h[4], rect, mirror);
-      const p5 = mapPoint(h[5], rect, mirror);
-      const p8 = mapPoint(h[8], rect, mirror);
-      const p9 = mapPoint(h[9], rect, mirror);
-      const p17 = mapPoint(h[17], rect, mirror);
-
-      // Distancia 2D normalizada: sin el error Z monocular que bloqueaba pellizcos
+  function updateSlots(mappedHands, now) {
+    const rawPinches = mappedHands.map((h) => {
+      const p0 = h[0], p4 = h[4], p5 = h[5], p8 = h[8], p9 = h[9], p17 = h[17];
       const scale = Math.max(
         Math.hypot(p9.x - p0.x, p9.y - p0.y),
         Math.hypot(p5.x - p17.x, p5.y - p17.y) * 1.15,
@@ -379,7 +373,6 @@ export function initHandControl({
           s.y = filtY;
         }
 
-        // Confirmación de 2 frames seguidos para eliminar rebotes y dobles clics
         if (!s.pinching) {
           s.exitStreak = 0;
           if (s.ratio < PINCH_ENTER) {
@@ -406,7 +399,6 @@ export function initHandControl({
           }
         }
       } else if (now - s.lastSeen > 180) {
-        // Cancelar limpio al perder la mano (nunca disparar clic fantasma)
         resetSlot(s);
       }
     }
@@ -451,7 +443,6 @@ export function initHandControl({
       if (!hoveredEls.has(el)) { el.classList.add("hand-hover"); hoveredEls.add(el); }
     }
 
-    // Doble pinch en la misma ventana -> Escalar + Mover
     const busyTwoHand =
       h0.active && h1.active && h0.pinching && h1.pinching &&
       h0.mode !== "slider" && h1.mode !== "slider" &&
@@ -632,8 +623,16 @@ export function initHandControl({
     }
   }
 
-  function drawOverlay() {
+  function drawOverlay(now, uiBlocked) {
     ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+    // 1. Módulos AR (Katana / Gojo / Hologramas) a 60 FPS
+    if (arEngine && arEngine.isActive()) {
+      arEngine.updateAndDraw(ctx, lastMappedHands, now, overlayCanvas.width, overlayCanvas.height);
+    }
+
+    // 2. Si el módulo AR está en acción (katana desenvainada o fusión Gojo), oculta cursores UI
+    if (uiBlocked) return;
 
     for (let i = ripples.length - 1; i >= 0; i--) {
       const rp = ripples[i];
@@ -693,18 +692,30 @@ export function initHandControl({
     syncOverlaySize();
 
     if (landmarker && video.readyState >= 2 && video.videoWidth > 0) {
+      const uiBlocked = Boolean(arEngine && arEngine.shouldBlockUI());
+
       if (video.currentTime !== lastVideoTime) {
         lastVideoTime = video.currentTime;
         const vw = video.videoWidth;
         const vh = video.videoHeight;
         const rect = getCoverRect(vw, vh, overlayCanvas.width, overlayCanvas.height);
+        const mirror = getMirror();
         const res = landmarker.detectForVideo(getScaledFrame(vw, vh), now);
-        updateSlots(res.landmarks || [], now, rect, getMirror());
-        processInteractions(now);
+
+        lastMappedHands = (res.landmarks || []).map((hand) =>
+          hand.map((lm) => mapPoint(lm, rect, mirror))
+        );
+
+        if (uiBlocked) {
+          resetAllSlots();
+        } else {
+          updateSlots(lastMappedHands, now);
+          processInteractions(now);
+        }
       }
 
       stepInertia();
-      drawOverlay();
+      drawOverlay(now, uiBlocked);
     }
 
     rafId = requestAnimationFrame(tick);
@@ -747,6 +758,7 @@ export function initHandControl({
 
       enabled = true;
       resetAllSlots();
+      lastMappedHands = [];
       lastVideoTime = -1;
       overlayCanvas.style.display = "block";
       toggleBtn.textContent = "MANOS: ON";
@@ -756,6 +768,7 @@ export function initHandControl({
       enabled = false;
       if (rafId) cancelAnimationFrame(rafId);
       rafId = null;
+      lastMappedHands = [];
       resetAllSlots();
       ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
       overlayCanvas.style.display = "none";
@@ -765,4 +778,9 @@ export function initHandControl({
   }
 
   toggleBtn.addEventListener("click", () => setEnabled(!enabled));
+
+  return {
+    ensureEnabled: () => setEnabled(true),
+    setAREngine: (engine) => { arEngine = engine; }
+  };
 }
