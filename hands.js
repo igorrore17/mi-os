@@ -1,5 +1,5 @@
 // =========================================================================
-// MySpatialOS — Fase 4: Control Aéreo + Puente Compartido para Módulos AR
+// MySpatialOS — Fase 4 v2: Control Aéreo + Puente Compartido (x, y, z)
 // =========================================================================
 
 import {
@@ -151,7 +151,7 @@ export function initHandControl({
 
   function mapPoint(lm, rect, mirror) {
     const nx = mirror ? 1 - lm.x : lm.x;
-    return { x: rect.x + nx * rect.w, y: rect.y + lm.y * rect.h };
+    return { x: rect.x + nx * rect.w, y: rect.y + lm.y * rect.h, z: lm.z || 0 };
   }
 
   function getScaledFrame(vw, vh) {
@@ -626,12 +626,10 @@ export function initHandControl({
   function drawOverlay(now, uiBlocked) {
     ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
-    // 1. Módulos AR (Katana / Gojo / Hologramas) a 60 FPS
     if (arEngine && arEngine.isActive()) {
       arEngine.updateAndDraw(ctx, lastMappedHands, now, overlayCanvas.width, overlayCanvas.height);
     }
 
-    // 2. Si el módulo AR está en acción (katana desenvainada o fusión Gojo), oculta cursores UI
     if (uiBlocked) return;
 
     for (let i = ripples.length - 1; i >= 0; i--) {
