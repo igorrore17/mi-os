@@ -1,10 +1,10 @@
 // =========================================================================
-// MySpatialOS — Fase 4 v2: Motor 360° + Cámara Canvas + Apps + Manos + AR 2.5D
+// MySpatialOS — Fase 4 v3: Motor 360° + Cámara Canvas + Apps + Manos + AR 2.5D
 // =========================================================================
 
 import { registerExtraApps } from "./apps.js?v=5";
 import { initHandControl } from "./hands.js?v=8";
-import { createARModules } from "./ar-modules.js?v=8";
+import { createARModules } from "./ar-modules.js?v=9";
 
 const bootScreen = document.getElementById("bootScreen");
 const bootBtn = document.getElementById("bootBtn");
