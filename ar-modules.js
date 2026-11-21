@@ -1,10 +1,10 @@
 // =========================================================================
-// MySpatialOS — Fase 4 v2: Katana Holográfica 2.5D + Oclusión Real de Mano
-// + Rebote de Luz + Gojo + Hologramas (comparte MediaPipe de hands.js)
+// MySpatialOS — Fase 4 v3: Katana Holográfica Realista (Agarre Firme,
+// Oclusión Limpia en Mango, Curva Real, Tajos de Energía y Audio)
 // =========================================================================
 
 class OneEuroFilter {
-  constructor(minCutoff = 2.4, beta = 0.06, dCutoff = 1.0) {
+  constructor(minCutoff = 3.2, beta = 0.14, dCutoff = 1.0) {
     this.minCutoff = minCutoff;
     this.beta = beta;
     this.dCutoff = dCutoff;
@@ -39,9 +39,9 @@ const KATANA_SKINS = [
     isHolo: true,
     glowRGB: "56, 189, 248",
     coreRGB: "224, 247, 255",
-    diamondGlow: "rgba(254, 243, 199, 0.88)",
-    itoFill: "rgba(12, 24, 38, 0.62)",
-    itoEdge: "rgba(125, 211, 252, 0.92)",
+    diamondGlow: "rgba(254, 243, 199, 0.92)",
+    itoFill: "rgba(10, 22, 36, 0.56)",
+    itoEdge: "rgba(125, 211, 252, 0.95)",
     tsubaRim: "#fef08a",
     tsubaMain: "#ca8a04",
     tsubaDark: "#713f12",
@@ -83,8 +83,8 @@ const KATANA_SKINS = [
     isHolo: true,
     glowRGB: "244, 63, 94",
     coreRGB: "255, 228, 230",
-    diamondGlow: "rgba(253, 164, 175, 0.9)",
-    itoFill: "rgba(28, 8, 14, 0.72)",
+    diamondGlow: "rgba(253, 164, 175, 0.92)",
+    itoFill: "rgba(28, 8, 14, 0.68)",
     itoEdge: "rgba(251, 113, 133, 0.95)",
     tsubaRim: "#fb7185",
     tsubaMain: "#881337",
@@ -111,11 +111,10 @@ const GOJO_PARTICLES = Array.from({ length: 64 }, () => ({
   r: 0.15 + Math.random() * 1.5
 }));
 
-const HOLO_SPARKS = Array.from({ length: 24 }, () => ({
+const HOLO_SPARKS = Array.from({ length: 28 }, () => ({
   t: Math.random(),
-  offset: (Math.random() - 0.5) * 24,
-  drift: (Math.random() - 0.5) * 18,
-  speed: 0.25 + Math.random() * 0.55,
+  offset: (Math.random() - 0.5) * 26,
+  speed: 0.22 + Math.random() * 0.55,
   size: 0.9 + Math.random() * 1.9,
   phase: Math.random() * Math.PI * 2
 }));
@@ -174,13 +173,14 @@ function getIndexTipOrigin(hand) {
 
 function createKatanaSlot() {
   return {
-    active: false, lastSeen: 0, x: 0, y: 0, scale: 80, fistW: 70, tilt: 0.2,
+    active: false, lastSeen: 0, x: 0, y: 0, scale: 80, fistW: 72, tilt: 0.22,
+    backOfHand: false,
     rawHand: null,
-    fx: new OneEuroFilter(2.4, 0.06, 1.0),
-    fy: new OneEuroFilter(2.4, 0.06, 1.0),
-    fAngle: new OneEuroFilter(2.2, 0.05, 1.0),
+    fx: new OneEuroFilter(3.2, 0.14, 1.0),
+    fy: new OneEuroFilter(3.2, 0.14, 1.0),
+    fAngle: new OneEuroFilter(3.0, 0.12, 1.0),
     hasAngle: false, unwrappedAngle: 0, angle: 0,
-    isFist: false, justFisted: false, isOpen: false,
+    isFist: false, justFisted: false, isOpen: false, isWideOpen: false,
     fistSince: 0, openSince: 0,
     velHist: [], peakUpVy: 0, peakUpTime: 0
   };
@@ -194,11 +194,81 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
 
   const camCanvas = bgCanvas || document.getElementById("bgCanvas");
 
-  // Offscreen canvas compacto para recortar los dedos del vídeo a 60 FPS sin lag
+  // Offscreen canvas para recortar la mano real encima del mango sin lag
   const occCanvas = document.createElement("canvas");
-  occCanvas.width = 224;
-  occCanvas.height = 224;
+  occCanvas.width = 256;
+  occCanvas.height = 256;
   const occCtx = occCanvas.getContext("2d");
+
+  // Audio procedural (sin archivos externos, cero latencia)
+  let audioCtx = null;
+  let noiseBuf = null;
+  let lastSlashSfxAt = 0;
+
+  function unlockAudio() {
+    if (!katana.sound) return;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      if (!audioCtx) {
+        audioCtx = new AC();
+        noiseBuf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.35, audioCtx.sampleRate);
+        const data = noiseBuf.getChannelData(0);
+        for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+      }
+      if (audioCtx.state === "suspended") audioCtx.resume();
+    } catch {}
+  }
+
+  function playIgniteSfx() {
+    if (!katana.sound || !audioCtx || audioCtx.state !== "running") return;
+    try {
+      const t = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(220, t);
+      osc.frequency.exponentialRampToValueAtTime(680, t + 0.14);
+      osc.frequency.exponentialRampToValueAtTime(420, t + 0.28);
+      gain.gain.setValueAtTime(0.001, t);
+      gain.gain.linearRampToValueAtTime(0.11, t + 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.30);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(t);
+      osc.stop(t + 0.31);
+    } catch {}
+  }
+
+  function playSlashSfx(intensity) {
+    if (!katana.sound || !audioCtx || !noiseBuf || audioCtx.state !== "running") return;
+    const now = performance.now();
+    if (now - lastSlashSfxAt < 185) return;
+    lastSlashSfxAt = now;
+    try {
+      const t = audioCtx.currentTime;
+      const src = audioCtx.createBufferSource();
+      src.buffer = noiseBuf;
+
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = "bandpass";
+      filter.Q.setValueAtTime(2.6, t);
+      filter.frequency.setValueAtTime(1600 + intensity * 900, t);
+      filter.frequency.exponentialRampToValueAtTime(340, t + 0.22);
+
+      const gain = audioCtx.createGain();
+      const vol = Math.min(0.24, 0.08 + intensity * 0.16);
+      gain.gain.setValueAtTime(0.001, t);
+      gain.gain.linearRampToValueAtTime(vol, t + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
+
+      src.connect(filter);
+      filter.connect(gain);
+      gain.connect(audioCtx.destination);
+      src.start(t);
+      src.stop(t + 0.25);
+    } catch {}
+  }
 
   const palmOpenAnim = [0, 0];
 
@@ -206,12 +276,13 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
     state: "IDLE",
     hands: [createKatanaSlot(), createKatanaSlot()],
     handleSlot: -1, sheathSlot: -1, heldSlot: -1, heldSince: 0,
-    x: 0, y: 0, angle: 0, angVel: 0, vx: 0, vy: 0, vAngle: 0,
-    fistW: 72,
-    handleLen: 168,
-    tsubaOffset: 44,
-    fullBladeLen: 310,
-    tilt: 0.25,
+    x: 0, y: 0, angle: 0, vx: 0, vy: 0, vAngle: 0,
+    lostSince: 0,
+    fistW: 74,
+    handleLen: 175,
+    tsubaOffset: 50,
+    fullBladeLen: 335,
+    tilt: 0.24,
     soriSign: -1,
     materialize: 0,
     drawDeadzone: 60, drawProgress: 0,
@@ -220,9 +291,13 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
     skinIndex: 0,
     reverseGrip: false,
     summonMode: "fist", // "fist" (1 puño) | "two" (2 puños)
+    throwEnabled: false, // OFF por defecto: jamás se suelta al cortar rápido
     occlusion: true,
+    sound: true,
     slowMo: true,
-    trail: [], ripples: []
+    trail: [],
+    slashSparks: [],
+    ripples: []
   };
 
   const gojo = {
@@ -242,10 +317,10 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
   function resetKatana() {
     katana.state = "IDLE";
     katana.handleSlot = -1; katana.sheathSlot = -1; katana.heldSlot = -1;
-    katana.drawProgress = 0; katana.angVel = 0; katana.materialize = 0;
+    katana.drawProgress = 0; katana.materialize = 0; katana.lostSince = 0;
     katana.vx = 0; katana.vy = 0; katana.vAngle = 0;
     katana.trail = [];
-    katana.drawCooldownUntil = performance.now() + 450;
+    katana.drawCooldownUntil = performance.now() + 420;
   }
 
   function resetGojo() {
@@ -262,11 +337,14 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
     palmOpenAnim[0] = 0;
     palmOpenAnim[1] = 0;
 
-    if (mode !== "off") ensureHandsEnabled();
+    if (mode !== "off") {
+      unlockAudio();
+      ensureHandsEnabled();
+    }
     const HINTS = {
       off: "Módulos AR desactivados",
       katana: katana.summonMode === "fist"
-        ? "Cierra un puño para empuñar la katana · Abre palma para guardar"
+        ? "Cierra el puño para empuñar · Abre toda la palma para guardar"
         : "Junta 2 puños y sepáralos para desenvainar",
       gojo: "Índice izq: Azul · Índice der: Rojo · Júntalos: Morado",
       holo: "Abre la palma para proyectar el Cubo 3D",
@@ -293,50 +371,66 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
   }
 
   // =========================================================================
-  // 1. MÓDULO KATANA HOLOGRÁFICA 2.5D + OCLUSIÓN DE PUÑO + REBOTE DE LUZ
+  // 1. MÓDULO KATANA HOLOGRÁFICA REALISTA (AGARRE FIJO + OCLUSIÓN LIMPIA)
   // =========================================================================
   function analyzeKatanaHand(hand, wasFist) {
     const wrist = hand[0];
     const palmLen = Math.hypot(hand[9].x - wrist.x, hand[9].y - wrist.y);
     const knuckleW = Math.hypot(hand[5].x - hand[17].x, hand[5].y - hand[17].y);
-    const scale = Math.max(palmLen, knuckleW, 20);
-    const fistW = Math.max(knuckleW, palmLen * 0.62, 34);
+    const pipW = Math.hypot(hand[6].x - hand[18].x, hand[6].y - hand[18].y);
+    const scale = Math.max(palmLen, knuckleW, 22);
+    const fistW = Math.max(knuckleW, pipW, palmLen * 0.64, 36);
 
-    // Centro del agarre desplazado entre nudillos y falanges cerradas
+    // Eje del agarre combinando nudillos (5-17) y falanges (6-18) para máxima estabilidad
+    const ux5 = hand[5].x - hand[17].x, uy5 = hand[5].y - hand[17].y;
+    const ux6 = hand[6].x - hand[18].x, uy6 = hand[6].y - hand[18].y;
+    const ax = ux5 * 0.72 + ux6 * 0.28;
+    const ay = uy5 * 0.72 + uy6 * 0.28;
+    const axisLen = Math.hypot(ax, ay);
+
+    const hasValidAxis = axisLen > scale * 0.22;
+    const rawAngle = hasValidAxis
+      ? (katana.reverseGrip ? Math.atan2(-ay, -ax) : Math.atan2(ay, ax))
+      : null;
+
+    // Detectar si el dorso o los dedos miran hacia la cámara usando profundidad Z
+    const avgKnuckleZ = (hand[5].z + hand[9].z + hand[13].z + hand[17].z) * 0.25;
+    const avgFingerZ = (hand[7].z + hand[8].z + hand[11].z + hand[12].z + hand[15].z + hand[16].z) / 6;
+    const backOfHand = avgKnuckleZ < avgFingerZ - 0.008;
+
+    // Centro exacto donde pasa la empuñadura dentro del puño
     const kx = (hand[5].x + hand[9].x + hand[13].x + hand[17].x) * 0.25;
     const ky = (hand[5].y + hand[9].y + hand[13].y + hand[17].y) * 0.25;
     const px = (hand[6].x + hand[10].x + hand[14].x + hand[18].x) * 0.25;
     const py = (hand[6].y + hand[10].y + hand[14].y + hand[18].y) * 0.25;
-    const cx = kx * 0.52 + px * 0.48;
-    const cy = ky * 0.52 + py * 0.48;
+    const cx = backOfHand ? (kx * 0.64 + px * 0.36) : (kx * 0.44 + px * 0.56);
+    const cy = backOfHand ? (ky * 0.64 + py * 0.36) : (ky * 0.44 + py * 0.56);
 
-    const hasValidAxis = knuckleW > scale * 0.25;
-    const rawAngle = hasValidAxis
-      ? (katana.reverseGrip
-          ? Math.atan2(hand[17].y - hand[5].y, hand[17].x - hand[5].x)
-          : Math.atan2(hand[5].y - hand[17].y, hand[5].x - hand[17].x))
-      : null;
-
-    // Inclinación Z para perspectiva 2.5D de la tsuba
     const dz = (hand[5].z || 0) - (hand[17].z || 0);
-    const tilt = Math.max(-0.7, Math.min(0.7, dz * 3.8));
+    const tilt = Math.max(-0.72, Math.min(0.72, dz * 3.8));
 
-    let extended = 0, curlSum = 0;
+    let extended = 0, wideExtended = 0, curlSum = 0;
     for (const [tip, pip] of [[8,6],[12,10],[16,14],[20,18]]) {
       const dTipW = Math.hypot(hand[tip].x - wrist.x, hand[tip].y - wrist.y);
       const dPipW = Math.hypot(hand[pip].x - wrist.x, hand[pip].y - wrist.y);
       const dPalm = Math.hypot(hand[tip].x - kx, hand[tip].y - ky) / scale;
       curlSum += dPalm;
-      if (dTipW > dPipW * 1.14 && dPalm > 1.04) extended++;
+      if (dTipW > dPipW * 1.15 && dPalm > 1.04) extended++;
+      if (dTipW > dPipW * 1.24 && dPalm > 1.18) wideExtended++;
     }
     const avgCurl = curlSum * 0.25;
-    // Histéresis en puño para que la oclusión nunca parpadee
-    const isFist = wasFist
-      ? (extended <= 1 && avgCurl < 1.24)
-      : (extended <= 1 && avgCurl < 1.12);
-    const isOpen = extended >= 3;
 
-    return { x: cx, y: cy, scale, fistW, rawAngle, tilt, isFist, isOpen, rawHand: hand };
+    // Histéresis amplia: si ya está agarrando, cuesta mucho soltar por accidente
+    const isFist = wasFist
+      ? (extended <= 2 && avgCurl < 1.32)
+      : (extended <= 1 && avgCurl < 1.14);
+    const isOpen = extended >= 3;
+    const isWideOpen = wideExtended >= 4 || (extended >= 4 && avgCurl > 1.28);
+
+    return {
+      x: cx, y: cy, scale, fistW, rawAngle, tilt, backOfHand,
+      isFist, isOpen, isWideOpen, rawHand: hand
+    };
   }
 
   function getSlotVel(slot) {
@@ -377,7 +471,8 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
         slot.x = slot.fx.filter(r.x, now); slot.y = slot.fy.filter(r.y, now);
         slot.scale = r.scale;
         slot.fistW = slot.fistW ? (slot.fistW * 0.72 + r.fistW * 0.28) : r.fistW;
-        slot.tilt = slot.tilt * 0.8 + r.tilt * 0.2;
+        slot.tilt = slot.tilt * 0.78 + r.tilt * 0.22;
+        slot.backOfHand = r.backOfHand;
         slot.rawHand = r.rawHand;
 
         if (!slot.isFist && r.isFist) {
@@ -387,9 +482,10 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
         if (!r.isFist) slot.fistSince = 0;
         slot.isFist = r.isFist;
 
-        if (!slot.isOpen && r.isOpen) slot.openSince = now;
-        if (!r.isOpen) slot.openSince = 0;
+        if (!slot.isWideOpen && r.isWideOpen) slot.openSince = now;
+        if (!r.isWideOpen) slot.openSince = 0;
         slot.isOpen = r.isOpen;
+        slot.isWideOpen = r.isWideOpen;
 
         if (r.rawAngle !== null) {
           if (!slot.hasAngle) {
@@ -409,11 +505,11 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
 
         const vel = getSlotVel(slot);
         if (vel.vy < slot.peakUpVy || now - slot.peakUpTime > 150) {
-          if (vel.vy < -180) { slot.peakUpVy = vel.vy; slot.peakUpTime = now; }
+          if (vel.vy < -200) { slot.peakUpVy = vel.vy; slot.peakUpTime = now; }
           else if (now - slot.peakUpTime > 150) slot.peakUpVy = 0;
         }
-      } else if (now - slot.lastSeen > 300) {
-        slot.active = false; slot.isFist = false; slot.isOpen = false;
+      } else if (now - slot.lastSeen > 420) {
+        slot.active = false; slot.isFist = false; slot.isOpen = false; slot.isWideOpen = false;
         slot.fistSince = 0; slot.openSince = 0; slot.rawHand = null;
         slot.hasAngle = false; slot.velHist = []; slot.peakUpVy = 0;
         slot.fx.reset(); slot.fy.reset(); slot.fAngle.reset();
@@ -422,11 +518,12 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
   }
 
   function updateKatanaDimensions(fistW, cw, ch, immediate = false) {
-    const targetFist = Math.max(46, Math.min(115, fistW));
-    const targetHandle = targetFist * 2.38;
-    const targetTsuba = targetFist * 0.60;
-    const targetBlade = Math.max(220, Math.min(Math.max(cw, ch) * 0.56, targetFist * 4.25));
-    const k = immediate ? 1 : 0.16;
+    const targetFist = Math.max(46, Math.min(118, fistW));
+    const targetHandle = targetFist * 2.48;
+    // Tsuba apoyada justo por fuera del borde índice/pulgar (como en la foto objetivo)
+    const targetTsuba = targetFist * 0.68;
+    const targetBlade = Math.max(245, Math.min(Math.max(cw, ch) * 0.59, targetFist * 4.55));
+    const k = immediate ? 1 : 0.18;
     katana.fistW += (targetFist - katana.fistW) * k;
     katana.handleLen += (targetHandle - katana.handleLen) * k;
     katana.tsubaOffset += (targetTsuba - katana.tsubaOffset) * k;
@@ -445,51 +542,104 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
     return cross >= 0 ? -1 : 1;
   }
 
-  function drawSlashTrail(ctx, now) {
+  function drawSlashTrailAndSparks(ctx, now, dt) {
     const skin = KATANA_SKINS[katana.skinIndex];
     const tsubaLocal = katana.tsubaOffset;
     const cos = Math.cos(katana.angle), sin = Math.sin(katana.angle);
     const curBladeLen = katana.fullBladeLen * katana.materialize;
     const basePt = { x: katana.x + tsubaLocal * cos, y: katana.y + tsubaLocal * sin };
     const lx = tsubaLocal + curBladeLen;
-    const ly = katana.soriSign * curBladeLen * 0.068;
+    const ly = katana.soriSign * curBladeLen * 0.088;
     const tipPt = { x: katana.x + lx * cos - ly * sin, y: katana.y + lx * sin + ly * cos };
 
     if ((katana.state === "HELD" || katana.state === "AIRBORNE") && katana.materialize > 0.7) {
       const prev = katana.trail[katana.trail.length - 1];
-      const spd = prev ? Math.hypot(tipPt.x - prev.tx, tipPt.y - prev.ty) : 0;
+      const dx = prev ? (tipPt.x - prev.tx) : 0;
+      const dy = prev ? (tipPt.y - prev.ty) : 0;
+      const spd = Math.hypot(dx, dy);
       katana.trail.push({ bx: basePt.x, by: basePt.y, tx: tipPt.x, ty: tipPt.y, spd, t: now });
+
+      // Si cortas rápido: sonido de tajo + chispas desprendiéndose del filo
+      if (spd > 28) {
+        const intensity = Math.min(1, (spd - 28) / 55);
+        playSlashSfx(intensity);
+        const count = Math.min(4, Math.ceil(intensity * 3));
+        for (let k = 0; k < count; k++) {
+          const u = 0.45 + Math.random() * 0.55;
+          katana.slashSparks.push({
+            x: basePt.x + (tipPt.x - basePt.x) * u,
+            y: basePt.y + (tipPt.y - basePt.y) * u,
+            vx: dx * (0.12 + Math.random() * 0.22) + (Math.random() - 0.5) * 90,
+            vy: dy * (0.12 + Math.random() * 0.22) + (Math.random() - 0.5) * 90,
+            life: 1,
+            size: 1.4 + Math.random() * 2.2
+          });
+        }
+      }
     }
-    while (katana.trail.length > 0 && (now - katana.trail[0].t > 130 || katana.trail.length > 10)) katana.trail.shift();
-    if (katana.trail.length < 3) return;
 
-    let maxSpd = 0;
-    for (const p of katana.trail) if (p.spd > maxSpd) maxSpd = p.spd;
-    if (maxSpd < 14) return;
-
-    const intensity = Math.min(0.76, (maxSpd - 14) / 45);
-    ctx.save();
-    if (skin.isHolo) ctx.globalCompositeOperation = "lighter";
-    for (let i = 1; i < katana.trail.length; i++) {
-      const p0 = katana.trail[i - 1], p1 = katana.trail[i];
-      const a = (i / katana.trail.length) * intensity;
-      ctx.fillStyle = `rgba(${skin.trail}, ${a * 0.36})`;
-      ctx.beginPath();
-      ctx.moveTo(p0.bx, p0.by); ctx.lineTo(p0.tx, p0.ty);
-      ctx.lineTo(p1.tx, p1.ty); ctx.lineTo(p1.bx, p1.by);
-      ctx.closePath(); ctx.fill();
-
-      ctx.strokeStyle = `rgba(${skin.trail}, ${a * 0.92})`;
-      ctx.lineWidth = 1.8 + (i / katana.trail.length) * 2.4;
-      ctx.beginPath(); ctx.moveTo(p0.tx, p0.ty); ctx.lineTo(p1.tx, p1.ty); ctx.stroke();
+    while (katana.trail.length > 0 && (now - katana.trail[0].t > 145 || katana.trail.length > 12)) {
+      katana.trail.shift();
     }
-    ctx.restore();
+
+    // Dibujar estela energética del tajo
+    if (katana.trail.length >= 3) {
+      let maxSpd = 0;
+      for (const p of katana.trail) if (p.spd > maxSpd) maxSpd = p.spd;
+      if (maxSpd > 14) {
+        const intensity = Math.min(0.84, (maxSpd - 14) / 42);
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        for (let i = 1; i < katana.trail.length; i++) {
+          const p0 = katana.trail[i - 1], p1 = katana.trail[i];
+          const prog = i / katana.trail.length;
+          const a = prog * intensity;
+
+          ctx.fillStyle = `rgba(${skin.trail}, ${a * 0.34})`;
+          ctx.beginPath();
+          ctx.moveTo(p0.bx, p0.by); ctx.lineTo(p0.tx, p0.ty);
+          ctx.lineTo(p1.tx, p1.ty); ctx.lineTo(p1.bx, p1.by);
+          ctx.closePath(); ctx.fill();
+
+          ctx.strokeStyle = `rgba(${skin.trail}, ${a * 0.92})`;
+          ctx.lineWidth = 2.0 + prog * 3.0;
+          ctx.beginPath(); ctx.moveTo(p0.tx, p0.ty); ctx.lineTo(p1.tx, p1.ty); ctx.stroke();
+
+          if (intensity > 0.45) {
+            ctx.strokeStyle = `rgba(255, 255, 255, ${a * 0.85})`;
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
+      }
+    }
+
+    // Actualizar y dibujar chispas del tajo
+    if (katana.slashSparks.length > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      for (let i = katana.slashSparks.length - 1; i >= 0; i--) {
+        const sp = katana.slashSparks[i];
+        sp.x += sp.vx * dt;
+        sp.y += sp.vy * dt;
+        sp.vx *= 0.94;
+        sp.vy *= 0.94;
+        sp.life -= dt * 3.1;
+        if (sp.life <= 0) { katana.slashSparks.splice(i, 1); continue; }
+        ctx.fillStyle = `rgba(${skin.coreRGB || skin.trail}, ${sp.life})`;
+        ctx.beginPath();
+        ctx.arc(sp.x, sp.y, sp.size * sp.life, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
   }
 
   function drawRealisticSaya(ctx, sx, sy, angle, bladeLen, alpha, soriSign) {
     if (alpha <= 0.01) return;
     const skin = KATANA_SKINS[katana.skinIndex];
-    const sayaLen = bladeLen * 0.96, sori = soriSign * bladeLen * 0.064, halfH = 8.2;
+    const sayaLen = bladeLen * 0.96, sori = soriSign * bladeLen * 0.082, halfH = 8.4;
 
     ctx.save();
     ctx.globalAlpha = alpha;
@@ -526,40 +676,38 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
     ctx.restore();
   }
 
-  // Guarda 2.5D dorada en perspectiva elíptica (como en las imágenes 2 y 3)
   function drawTsuba25D(ctx, tsubaX, hHalf, tilt, skin) {
-    const rx = Math.max(7.5, hHalf * (1.02 + Math.abs(tilt) * 0.95));
-    const ry = Math.max(21, hHalf * 3.05);
-    const thickness = 3.8;
+    const rx = Math.max(9.0, hHalf * (1.16 + Math.abs(tilt) * 0.95));
+    const ry = Math.max(24, hHalf * 3.35);
+    const thickness = 4.2;
 
     ctx.save();
 
-    // Resplandor suave detrás de la tsuba en modo holograma
     if (skin.isHolo) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      const halo = ctx.createRadialGradient(tsubaX, 0, 2, tsubaX, 0, ry * 1.35);
-      halo.addColorStop(0, "rgba(254, 240, 138, 0.38)");
-      halo.addColorStop(0.5, `rgba(${skin.glowRGB}, 0.22)`);
+      const halo = ctx.createRadialGradient(tsubaX, 0, 2, tsubaX, 0, ry * 1.4);
+      halo.addColorStop(0, "rgba(254, 240, 138, 0.42)");
+      halo.addColorStop(0.5, `rgba(${skin.glowRGB}, 0.24)`);
       halo.addColorStop(1, "rgba(0, 0, 0, 0)");
       ctx.fillStyle = halo;
       ctx.beginPath();
-      ctx.arc(tsubaX, 0, ry * 1.35, 0, Math.PI * 2);
+      ctx.arc(tsubaX, 0, ry * 1.4, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
 
-    // Canto trasero (da volumen 3D al disco)
+    // Canto trasero 3D
     ctx.fillStyle = skin.tsubaDark;
     ctx.beginPath();
     ctx.ellipse(tsubaX - thickness, 0, rx, ry, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Cara frontal metálica dorada
+    // Cara metálica dorada
     const faceGrad = ctx.createLinearGradient(tsubaX - rx, -ry, tsubaX + rx, ry);
     faceGrad.addColorStop(0, skin.tsubaRim);
-    faceGrad.addColorStop(0.28, skin.tsubaMain);
-    faceGrad.addColorStop(0.55, skin.tsubaRim);
+    faceGrad.addColorStop(0.26, skin.tsubaMain);
+    faceGrad.addColorStop(0.54, skin.tsubaRim);
     faceGrad.addColorStop(0.82, skin.tsubaDark);
     faceGrad.addColorStop(1, skin.tsubaRim);
 
@@ -568,46 +716,43 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
     ctx.ellipse(tsubaX, 0, rx, ry, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Relieve interior y filigranas grabadas (sukashi)
-    ctx.strokeStyle = "rgba(66, 32, 6, 0.65)";
-    ctx.lineWidth = 1.4;
+    // Relieve interior y filigranas
+    ctx.strokeStyle = "rgba(66, 32, 6, 0.68)";
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.ellipse(tsubaX, 0, rx * 0.78, ry * 0.78, 0, 0, Math.PI * 2);
     ctx.stroke();
 
-    ctx.strokeStyle = "rgba(254, 249, 195, 0.7)";
-    ctx.lineWidth = 1.0;
+    ctx.strokeStyle = "rgba(254, 249, 195, 0.78)";
+    ctx.lineWidth = 1.1;
     ctx.beginPath();
-    ctx.ellipse(tsubaX + 0.5, 0, rx * 0.62, ry * 0.62, 0, 0, Math.PI * 2);
+    ctx.ellipse(tsubaX + 0.5, 0, rx * 0.60, ry * 0.60, 0, 0, Math.PI * 2);
     ctx.stroke();
 
-    // 2 aberturas laterales estilizadas (hitsu-ana)
-    ctx.fillStyle = "rgba(35, 18, 5, 0.7)";
+    ctx.fillStyle = "rgba(35, 18, 5, 0.72)";
     ctx.beginPath();
     ctx.ellipse(tsubaX, -ry * 0.52, rx * 0.24, ry * 0.16, 0, 0, Math.PI * 2);
     ctx.ellipse(tsubaX, ry * 0.52, rx * 0.24, ry * 0.16, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Borde brillante exterior
     ctx.strokeStyle = skin.tsubaRim;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1.6;
     ctx.beginPath();
     ctx.ellipse(tsubaX, 0, rx, ry, 0, 0, Math.PI * 2);
     ctx.stroke();
 
     if (skin.isHolo) {
       ctx.globalCompositeOperation = "lighter";
-      ctx.strokeStyle = `rgba(${skin.glowRGB}, 0.55)`;
-      ctx.lineWidth = 2.2;
+      ctx.strokeStyle = `rgba(${skin.glowRGB}, 0.52)`;
+      ctx.lineWidth = 2.0;
       ctx.beginPath();
-      ctx.ellipse(tsubaX + 0.8, 0, rx + 0.8, ry + 0.8, 0, -0.9, 0.9);
+      ctx.ellipse(tsubaX + 0.8, 0, rx + 0.9, ry + 0.9, 0, -1.0, 1.0);
       ctx.stroke();
     }
 
     ctx.restore();
   }
 
-  // Empuñadura + Hoja completa (Holográfica translúcida o Acero PBR)
   function drawKatanaBody(ctx, x, y, angle, handleLen, tsubaX, bladeLen, alpha, now, soriSign, tilt, clipAtX = null) {
     if (alpha <= 0.01) return;
     const skin = KATANA_SKINS[katana.skinIndex];
@@ -619,45 +764,41 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
     ctx.rotate(angle);
 
     const handleBack = tsubaX - handleLen;
-    const hHalf = Math.max(7.5, katana.fistW * 0.135);
-    const habakiLen = Math.max(12, hHalf * 1.45);
+    const hHalf = Math.max(8.0, katana.fistW * 0.142);
+    const habakiLen = Math.max(13, hHalf * 1.5);
     const bladeStart = tsubaX + 2;
-    const sori = soriSign * bladeLen * 0.068;
+    const sori = soriSign * bladeLen * 0.088;
 
     if (clipAtX !== null) {
       ctx.beginPath();
-      ctx.rect(handleBack - 30, -140, clipAtX - (handleBack - 30), 280);
+      ctx.rect(handleBack - 30, -160, clipAtX - (handleBack - 30), 320);
       ctx.clip();
     }
 
-    // ---------------------------------------------------------------------
-    // 1. EMPUÑADURA (TSUKA)
-    // ---------------------------------------------------------------------
-    const tsukaStart = handleBack + 7;
+    // --- 1. EMPUÑADURA (TSUKA) ---
+    const tsukaStart = handleBack + 8;
     const tsukaEnd = tsubaX - 4;
     const tsukaLen = Math.max(30, tsukaEnd - tsukaStart);
-    const wraps = Math.max(7, Math.round(tsukaLen / (hHalf * 1.45)));
+    const wraps = Math.max(7, Math.round(tsukaLen / (hHalf * 1.5)));
     const stepW = tsukaLen / wraps;
 
     if (skin.isHolo) {
-      // Base translúcida holográfica
       const hGrad = ctx.createLinearGradient(0, -hHalf, 0, hHalf);
-      hGrad.addColorStop(0, `rgba(${skin.glowRGB}, 0.28)`);
+      hGrad.addColorStop(0, `rgba(${skin.glowRGB}, 0.30)`);
       hGrad.addColorStop(0.5, skin.itoFill);
-      hGrad.addColorStop(1, `rgba(${skin.glowRGB}, 0.28)`);
+      hGrad.addColorStop(1, `rgba(${skin.glowRGB}, 0.30)`);
 
       ctx.fillStyle = hGrad;
       ctx.beginPath();
       ctx.roundRect(handleBack, -hHalf, handleLen - 2, hHalf * 2, [5, 2, 2, 5]);
       ctx.fill();
 
-      // Rombos luminosos del tsukamaki (mismo patrón cálido/dorado de imágenes 2 y 3)
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       for (let i = 0; i < wraps; i++) {
         const cxD = tsukaStart + (i + 0.5) * stepW;
-        const dw = stepW * 0.36;
-        const dh = hHalf * 0.62;
+        const dw = stepW * 0.38;
+        const dh = hHalf * 0.64;
 
         ctx.fillStyle = skin.diamondGlow;
         ctx.beginPath();
@@ -668,8 +809,7 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
         ctx.closePath();
         ctx.fill();
 
-        // Cruces del trenzado holográfico
-        ctx.strokeStyle = `rgba(${skin.glowRGB}, 0.55)`;
+        ctx.strokeStyle = `rgba(${skin.glowRGB}, 0.52)`;
         ctx.lineWidth = 1.4;
         ctx.beginPath();
         ctx.moveTo(cxD - stepW * 0.5, -hHalf);
@@ -679,8 +819,7 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
         ctx.stroke();
       }
 
-      // Contorno neón de la empuñadura y kashira
-      ctx.strokeStyle = `rgba(${skin.glowRGB}, 0.38)`;
+      ctx.strokeStyle = `rgba(${skin.glowRGB}, 0.36)`;
       ctx.lineWidth = 6.5;
       ctx.beginPath();
       ctx.roundRect(handleBack, -hHalf, handleLen - 2, hHalf * 2, [5, 2, 2, 5]);
@@ -690,7 +829,6 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
       ctx.lineWidth = 1.8;
       ctx.stroke();
 
-      // Remate dorado/neón en la base (kashira)
       ctx.strokeStyle = skin.tsubaRim;
       ctx.lineWidth = 1.6;
       ctx.beginPath();
@@ -721,18 +859,14 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
       ctx.fillRect(tsukaEnd - 1, -hHalf - 0.4, 1.4, hHalf * 2 + 0.8);
     }
 
-    // ---------------------------------------------------------------------
-    // 2. GUARDA (TSUBA 2.5D EN PERSPECTIVA)
-    // ---------------------------------------------------------------------
+    // --- 2. TSUBA 2.5D ---
     drawTsuba25D(ctx, tsubaX, hHalf, tilt, skin);
 
-    // ---------------------------------------------------------------------
-    // 3. HOJA (GEOMETRÍA CURVADA CON KISSAKI)
-    // ---------------------------------------------------------------------
+    // --- 3. HOJA CURVADA ---
     if (bladeLen > 8) {
-      const segs = 18;
+      const segs = 20;
       const yokoteT = 0.88;
-      const baseHalfW = Math.max(5.8, hHalf * 0.84);
+      const baseHalfW = Math.max(6.4, hHalf * 0.90);
       const spinePts = [], ridgePts = [], edgePts = [];
 
       for (let i = 0; i <= segs; i++) {
@@ -740,18 +874,18 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
         const px = bladeStart + u * bladeLen;
         const curveY = sori * u * u;
         let spineY, ridgeY, edgeY;
-        const dir = -soriSign; // filo en el lado convexo exterior
+        const dir = -soriSign;
 
         if (u <= yokoteT) {
-          const hw = baseHalfW * (1 - (u / yokoteT) * 0.22);
+          const hw = baseHalfW * (1 - (u / yokoteT) * 0.25);
           spineY = curveY - dir * hw;
-          ridgeY = curveY - dir * hw * 0.25;
+          ridgeY = curveY - dir * hw * 0.26;
           edgeY = curveY + dir * hw;
         } else {
           const kt = (u - yokoteT) / (1 - yokoteT);
-          const yhw = baseHalfW * 0.78;
+          const yhw = baseHalfW * 0.75;
           spineY = curveY - dir * yhw * (1 - kt * 0.1);
-          ridgeY = curveY - dir * yhw * (0.25 + kt * 0.6);
+          ridgeY = curveY - dir * yhw * (0.26 + kt * 0.58);
           edgeY = curveY + dir * yhw * (1 - Math.pow(kt, 1.5) * 1.9);
         }
         spinePts.push({ x: px, y: spineY });
@@ -768,12 +902,13 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
       };
 
       if (skin.isHolo) {
-        // Capa 1: Aura volumétrica suave exterior
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
+
+        // Halo suave exterior
         traceFullBlade();
-        ctx.strokeStyle = `rgba(${skin.glowRGB}, 0.24)`;
-        ctx.lineWidth = 14;
+        ctx.strokeStyle = `rgba(${skin.glowRGB}, 0.22)`;
+        ctx.lineWidth = 15;
         ctx.lineJoin = "round";
         ctx.stroke();
 
@@ -781,81 +916,80 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
         ctx.lineWidth = 6.5;
         ctx.stroke();
 
-        // Capa 2: Cuerpo translúcido de energía (deja ver el fondo real detrás)
-        const sheen1 = 0.22 + ((t * 0.38 + Math.sin(angle) * 0.25) % 0.7);
-        const sheen2 = (sheen1 + 0.42) % 0.92;
-        const bodyGrad = ctx.createLinearGradient(bladeStart, 0, bladeStart + bladeLen, sori);
-        bodyGrad.addColorStop(0, `rgba(${skin.glowRGB}, 0.52)`);
-        bodyGrad.addColorStop(Math.max(0.05, Math.min(0.9, sheen1)), `rgba(${skin.coreRGB}, 0.62)`);
-        bodyGrad.addColorStop(Math.max(0.08, Math.min(0.95, sheen1 + 0.14)), `rgba(${skin.glowRGB}, 0.22)`);
-        bodyGrad.addColorStop(Math.max(0.08, Math.min(0.95, sheen2)), `rgba(${skin.coreRGB}, 0.56)`);
-        bodyGrad.addColorStop(1, `rgba(${skin.coreRGB}, 0.85)`);
+        // Cuerpo vítreo translúcido con reflejos diagonales suaves
+        const sheen1 = 0.20 + (((t * 0.34 + Math.sin(angle) * 0.28) % 0.65 + 0.65) % 0.65);
+        const sheen2 = (sheen1 + 0.38) % 0.90;
+        const bodyGrad = ctx.createLinearGradient(bladeStart, -baseHalfW, bladeStart + bladeLen, sori + baseHalfW);
+        bodyGrad.addColorStop(0, `rgba(${skin.glowRGB}, 0.44)`);
+        bodyGrad.addColorStop(Math.max(0.05, Math.min(0.88, sheen1)), `rgba(${skin.coreRGB}, 0.56)`);
+        bodyGrad.addColorStop(Math.max(0.08, Math.min(0.94, sheen1 + 0.14)), `rgba(${skin.glowRGB}, 0.16)`);
+        bodyGrad.addColorStop(Math.max(0.08, Math.min(0.94, sheen2)), `rgba(${skin.coreRGB}, 0.50)`);
+        bodyGrad.addColorStop(1, `rgba(${skin.coreRGB}, 0.84)`);
 
         ctx.fillStyle = bodyGrad;
         ctx.fill();
 
-        // Capa 3: Plano biselado del filo más luminoso
+        // Bisel del filo ligeramente más claro
         ctx.beginPath();
         ctx.moveTo(ridgePts[0].x, ridgePts[0].y);
         for (let i = 1; i <= segs; i++) ctx.lineTo(ridgePts[i].x, ridgePts[i].y);
         for (let i = segs; i >= 0; i--) ctx.lineTo(edgePts[i].x, edgePts[i].y);
         ctx.closePath();
-        ctx.fillStyle = `rgba(${skin.coreRGB}, 0.28)`;
+        ctx.fillStyle = `rgba(${skin.coreRGB}, 0.24)`;
         ctx.fill();
 
-        // Capa 4: Arista Shinogi + línea Hamon ondulada
+        // Shinogi + Hamon sutil
         ctx.beginPath();
         ctx.moveTo(ridgePts[0].x, ridgePts[0].y);
         for (let i = 1; i <= segs; i++) ctx.lineTo(ridgePts[i].x, ridgePts[i].y);
-        ctx.strokeStyle = `rgba(${skin.coreRGB}, 0.55)`;
-        ctx.lineWidth = 1.0;
+        ctx.strokeStyle = `rgba(${skin.coreRGB}, 0.48)`;
+        ctx.lineWidth = 0.95;
         ctx.stroke();
 
         ctx.beginPath();
         for (let i = 1; i <= segs; i++) {
           const u = i / segs;
-          const wave = Math.sin(u * 30 - t * 4) * 1.1;
+          const wave = Math.sin(u * 28 - t * 3.5) * 1.05;
           const hx = edgePts[i].x;
           const hy = edgePts[i].y * 0.68 + ridgePts[i].y * 0.32 + wave;
           if (i === 1) ctx.moveTo(hx, hy); else ctx.lineTo(hx, hy);
         }
-        ctx.strokeStyle = `rgba(${skin.coreRGB}, 0.65)`;
-        ctx.lineWidth = 1.1;
+        ctx.strokeStyle = `rgba(${skin.coreRGB}, 0.55)`;
+        ctx.lineWidth = 1.0;
         ctx.stroke();
 
-        // Capa 5: Filo vivo blanco-incandescente + lomo iluminado
+        // Filo blanco incandescente + lomo
         ctx.beginPath();
         ctx.moveTo(edgePts[0].x, edgePts[0].y);
         for (let i = 1; i <= segs; i++) ctx.lineTo(edgePts[i].x, edgePts[i].y);
         ctx.strokeStyle = `rgba(${skin.glowRGB}, 0.85)`;
-        ctx.lineWidth = 4.2;
+        ctx.lineWidth = 4.0;
         ctx.stroke();
         ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 1.7;
+        ctx.lineWidth = 1.6;
         ctx.stroke();
 
         ctx.beginPath();
         ctx.moveTo(spinePts[0].x, spinePts[0].y);
         for (let i = 1; i <= segs; i++) ctx.lineTo(spinePts[i].x, spinePts[i].y);
-        ctx.strokeStyle = `rgba(${skin.coreRGB}, 0.72)`;
-        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = `rgba(${skin.coreRGB}, 0.68)`;
+        ctx.lineWidth = 1.15;
         ctx.stroke();
 
-        // Capa 6: Chispas holográficas flotando alrededor de la hoja
+        // Chispas flotantes alrededor de la hoja
         for (const sp of HOLO_SPARKS) {
-          const u = (sp.t + t * sp.speed * 0.25) % 1;
+          const u = (sp.t + t * sp.speed * 0.22) % 1;
           const px = bladeStart + u * bladeLen;
           const baseY = sori * u * u;
-          const py = baseY + sp.offset + Math.sin(t * 2.6 + sp.phase) * 7;
-          const tw = 0.35 + 0.65 * Math.abs(Math.sin(t * 4.5 + sp.phase));
-          ctx.fillStyle = `rgba(${skin.coreRGB}, ${tw * 0.85})`;
+          const py = baseY + sp.offset + Math.sin(t * 2.5 + sp.phase) * 7;
+          const tw = 0.3 + 0.7 * Math.abs(Math.sin(t * 4.2 + sp.phase));
+          ctx.fillStyle = `rgba(${skin.coreRGB}, ${tw * 0.82})`;
           ctx.beginPath();
           ctx.arc(px, py, sp.size, 0, Math.PI * 2);
           ctx.fill();
         }
         ctx.restore();
       } else {
-        // Modo metálico realista (Acero / Blanca)
         const upperGrad = ctx.createLinearGradient(bladeStart, -baseHalfW, bladeStart + bladeLen, sori);
         upperGrad.addColorStop(0, skin.spineDark); upperGrad.addColorStop(0.45, skin.spineMid); upperGrad.addColorStop(1, skin.spineTop);
         ctx.beginPath();
@@ -890,7 +1024,7 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
         ctx.strokeStyle = skin.edgeLight; ctx.lineWidth = 1.3; ctx.stroke();
       }
 
-      // Habaki dorado emergiendo del centro de la tsuba
+      // Habaki dorado emergiendo del centro de la guarda
       const habGrad = ctx.createLinearGradient(0, -baseHalfW - 1, 0, baseHalfW + 1);
       habGrad.addColorStop(0, skin.habakiTop);
       habGrad.addColorStop(0.5, skin.habakiMid);
@@ -908,16 +1042,15 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
     ctx.restore();
   }
 
-  // Oclusión real: recorta tus dedos cerrados y pulgar desde bgCanvas encima de la empuñadura
-  // + rebote de luz cian sobre la piel del pulgar y palma
+  // Oclusión recortada ESTRICTAMENTE al mango (detrás de la tsuba):
+  // cero manchas fuera del mango y tsuba siempre nítida por delante
   function drawHandOcclusionAndLight(ctx, slot, cw, ch) {
     if (!slot || !slot.rawHand) return;
     const skin = KATANA_SKINS[katana.skinIndex];
     const h = slot.rawHand;
 
-    // 1. Oclusión real de dedos cuando el puño está cerrado y la cámara está activa
-    if (katana.occlusion && slot.isFist && camCanvas && camCanvas.style.display !== "none" && camCanvas.width > 0) {
-      const halfBox = Math.max(90, slot.fistW * 1.9);
+    if (katana.occlusion && !slot.isWideOpen && camCanvas && camCanvas.style.display !== "none" && camCanvas.width > 0) {
+      const halfBox = Math.max(96, slot.fistW * 2.0);
       const rx = slot.x - halfBox;
       const ry = slot.y - halfBox;
       const rw = halfBox * 2;
@@ -931,75 +1064,101 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
       if (x1 > x0 + 4 && y1 > y0 + 4) {
         const ow = occCanvas.width;
         const oh = occCanvas.height;
-        const toX = (px) => ((px - rx) / rw) * ow;
-        const toY = (py) => ((py - ry) / rh) * oh;
         const sc = ow / rw;
+        const toX = (px) => (px - rx) * sc;
+        const toY = (py) => (py - ry) * sc;
 
         occCtx.save();
         occCtx.globalCompositeOperation = "source-over";
         occCtx.clearRect(0, 0, ow, oh);
+
+        // 1. Recorte geométrico exacto al mango (nunca toca la tsuba, la hoja ni el suelo)
+        const cos = Math.cos(katana.angle), sin = Math.sin(katana.angle);
+        const hHalf = Math.max(8.0, katana.fistW * 0.142);
+        const cL = katana.tsubaOffset - katana.handleLen - 14;
+        const cR = katana.tsubaOffset - 3;
+        const cH = hHalf * 2.55;
+        const toLocalOcc = (lx, ly) => ({
+          x: toX(katana.x + lx * cos - ly * sin),
+          y: toY(katana.y + lx * sin + ly * cos)
+        });
+        const p1 = toLocalOcc(cL, -cH), p2 = toLocalOcc(cR, -cH);
+        const p3 = toLocalOcc(cR,  cH), p4 = toLocalOcc(cL,  cH);
+
+        occCtx.beginPath();
+        occCtx.moveTo(p1.x, p1.y);
+        occCtx.lineTo(p2.x, p2.y);
+        occCtx.lineTo(p3.x, p3.y);
+        occCtx.lineTo(p4.x, p4.y);
+        occCtx.closePath();
+        occCtx.clip();
+
+        // 2. Silueta de la parte de tu mano que está DELANTE del mango
         occCtx.lineCap = "round";
         occCtx.lineJoin = "round";
         occCtx.fillStyle = "#ffffff";
         occCtx.strokeStyle = "#ffffff";
 
-        const drawFingerMask = (widthMult) => {
-          const wF = Math.max(8, slot.fistW * 0.27) * sc * widthMult;
-          const wP = Math.max(7, slot.fistW * 0.23) * sc * widthMult;
-          const wT = Math.max(9, slot.fistW * 0.30) * sc * widthMult;
+        const wF = Math.max(7.5, slot.fistW * 0.25) * sc;
+        const wP = Math.max(6.5, slot.fistW * 0.21) * sc;
+        const wT = Math.max(8.5, slot.fistW * 0.28) * sc;
 
-          // 4 dedos cerrados envolviendo el mango
-          const chains = [
-            { ids: [5, 6, 7, 8], w: wF },
-            { ids: [9, 10, 11, 12], w: wF * 1.04 },
-            { ids: [13, 14, 15, 16], w: wF * 0.98 },
-            { ids: [17, 18, 19, 20], w: wP }
+        const fillPoly = (ids) => {
+          occCtx.beginPath();
+          occCtx.moveTo(toX(h[ids[0]].x), toY(h[ids[0]].y));
+          for (let k = 1; k < ids.length; k++) occCtx.lineTo(toX(h[ids[k]].x), toY(h[ids[k]].y));
+          occCtx.closePath();
+          occCtx.fill();
+        };
+
+        if (slot.backOfHand) {
+          // Dorso de la mano hacia cámara: dorso + nudillos + primeras falanges cubren el mango
+          fillPoly([0, 1, 2, 5, 9, 13, 17]);
+          fillPoly([5, 9, 13, 17, 18, 14, 10, 6]);
+          const backChains = [
+            { ids: [5, 6, 7], w: wF },
+            { ids: [9, 10, 11], w: wF * 1.03 },
+            { ids: [13, 14, 15], w: wF * 0.96 },
+            { ids: [17, 18, 19], w: wP },
+            { ids: [1, 2, 3], w: wT }
           ];
-          for (const c of chains) {
+          for (const c of backChains) {
             occCtx.lineWidth = c.w;
             occCtx.beginPath();
             occCtx.moveTo(toX(h[c.ids[0]].x), toY(h[c.ids[0]].y));
-            for (let k = 1; k < c.ids.length; k++) {
-              occCtx.lineTo(toX(h[c.ids[k]].x), toY(h[c.ids[k]].y));
-            }
+            for (let k = 1; k < c.ids.length; k++) occCtx.lineTo(toX(h[c.ids[k]].x), toY(h[c.ids[k]].y));
             occCtx.stroke();
           }
-
-          // Pulgar cerrando por delante
-          occCtx.lineWidth = wT;
-          occCtx.beginPath();
-          occCtx.moveTo(toX(h[2].x), toY(h[2].y));
-          occCtx.lineTo(toX(h[3].x), toY(h[3].y));
-          occCtx.lineTo(toX(h[4].x), toY(h[4].y));
-          occCtx.stroke();
-
-          // Relleno sólido entre dedos adyacentes para que no se cuele la hoja por las rendijas
-          const fillPoly = (ids) => {
+        } else {
+          // Dedos hacia cámara: los 4 dedos cerrados y el pulgar envuelven el mango
+          const frontChains = [
+            { ids: [5, 6, 7, 8], w: wF },
+            { ids: [9, 10, 11, 12], w: wF * 1.04 },
+            { ids: [13, 14, 15, 16], w: wF * 0.96 },
+            { ids: [17, 18, 19, 20], w: wP },
+            { ids: [2, 3, 4], w: wT }
+          ];
+          for (const c of frontChains) {
+            occCtx.lineWidth = c.w;
             occCtx.beginPath();
-            occCtx.moveTo(toX(h[ids[0]].x), toY(h[ids[0]].y));
-            for (let k = 1; k < ids.length; k++) occCtx.lineTo(toX(h[ids[k]].x), toY(h[ids[k]].y));
-            occCtx.closePath();
-            occCtx.fill();
-          };
-          fillPoly([5, 9, 13, 17, 18, 14, 10, 6]);
-          fillPoly([6, 10, 14, 18, 19, 15, 11, 7]);
-          fillPoly([7, 11, 15, 19, 20, 16, 12, 8]);
-        };
+            occCtx.moveTo(toX(h[c.ids[0]].x), toY(h[c.ids[0]].y));
+            for (let k = 1; k < c.ids.length; k++) occCtx.lineTo(toX(h[c.ids[k]].x), toY(h[c.ids[k]].y));
+            occCtx.stroke();
+          }
+          if (slot.isFist) {
+            fillPoly([5, 9, 13, 17, 18, 14, 10, 6]);
+            fillPoly([6, 10, 14, 18, 19, 15, 11, 7]);
+          }
+        }
 
-        // Doble pasada: borde exterior suave (feather) + núcleo sólido sin usar shadowBlur lento
-        occCtx.globalAlpha = 0.42;
-        drawFingerMask(1.16);
-        occCtx.globalAlpha = 1.0;
-        drawFingerMask(1.0);
-
-        // Recortar los píxeles reales de tus dedos desde bgCanvas
+        // 3. Copiar píxeles reales de tu mano desde bgCanvas
         occCtx.globalCompositeOperation = "source-in";
         const scaleX = camCanvas.width / cw;
         const scaleY = camCanvas.height / ch;
-        const dx = ((x0 - rx) / rw) * ow;
-        const dy = ((y0 - ry) / rh) * oh;
-        const dw = ((x1 - x0) / rw) * ow;
-        const dh = ((y1 - y0) / rh) * oh;
+        const dx = (x0 - rx) * sc;
+        const dy = (y0 - ry) * sc;
+        const dw = (x1 - x0) * sc;
+        const dh = (y1 - y0) * sc;
 
         occCtx.drawImage(
           camCanvas,
@@ -1008,36 +1167,33 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
         );
         occCtx.restore();
 
-        // Componer tus dedos reales encima de la katana
         ctx.drawImage(occCanvas, rx, ry, rw, rh);
       }
     }
 
-    // 2. Rebote de luz holográfica sobre la piel del pulgar, palma y nudillos
+    // 4. Rebote realista de luz holográfica sobre la piel del pulgar y palma
     if (skin.isHolo) {
       ctx.save();
       ctx.globalCompositeOperation = "screen";
 
-      // Zona de la eminencia tenar (base del pulgar / palma) donde más rebota la luz
-      const palmLightX = (h[1].x + h[2].x + h[5].x + h[9].x) * 0.25;
-      const palmLightY = (h[1].y + h[2].y + h[5].y + h[9].y) * 0.25;
-      const lightR = Math.max(48, slot.fistW * 1.15);
+      const palmLightX = (h[2].x + h[3].x + h[5].x) / 3;
+      const palmLightY = (h[2].y + h[3].y + h[5].y) / 3;
+      const lightR = Math.max(42, slot.fistW * 0.98);
 
-      const skinGlow = ctx.createRadialGradient(palmLightX, palmLightY, 4, palmLightX, palmLightY, lightR);
-      skinGlow.addColorStop(0, `rgba(${skin.coreRGB}, 0.46)`);
-      skinGlow.addColorStop(0.45, `rgba(${skin.glowRGB}, 0.24)`);
+      const skinGlow = ctx.createRadialGradient(palmLightX, palmLightY, 3, palmLightX, palmLightY, lightR);
+      skinGlow.addColorStop(0, `rgba(${skin.coreRGB}, 0.44)`);
+      skinGlow.addColorStop(0.45, `rgba(${skin.glowRGB}, 0.22)`);
       skinGlow.addColorStop(1, "rgba(0, 0, 0, 0)");
       ctx.fillStyle = skinGlow;
       ctx.beginPath();
       ctx.arc(palmLightX, palmLightY, lightR, 0, Math.PI * 2);
       ctx.fill();
 
-      // Brillo sutil envolviendo la entrada/salida del puño (rim light en dedos)
       ctx.globalCompositeOperation = "lighter";
-      const rimR = Math.max(26, slot.fistW * 0.55);
+      const rimR = Math.max(22, slot.fistW * 0.45);
       for (const idx of [5, 17]) {
         const rg = ctx.createRadialGradient(h[idx].x, h[idx].y, 1, h[idx].x, h[idx].y, rimR);
-        rg.addColorStop(0, `rgba(${skin.glowRGB}, 0.26)`);
+        rg.addColorStop(0, `rgba(${skin.glowRGB}, 0.24)`);
         rg.addColorStop(1, "rgba(0, 0, 0, 0)");
         ctx.fillStyle = rg;
         ctx.beginPath();
@@ -1056,7 +1212,7 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
       katana.trail = [];
       katana.materialize = 0;
 
-      // Prioridad 1: si juntas 2 puños cerca -> desenvaine clásico en ambos modos
+      // Prioridad 1: 2 puños juntos -> desenvaine clásico
       if (now > katana.drawCooldownUntil && h0.active && h1.active && h0.isFist && h1.isFist) {
         const dist = Math.hypot(h0.x - h1.x, h0.y - h1.y);
         const avgScale = (h0.scale + h1.scale) * 0.5;
@@ -1072,24 +1228,25 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
         }
       }
 
-      // Prioridad 2: modo 1 PUÑO -> cierra una sola mano para materializarla en tu agarre
+      // Prioridad 2: modo 1 PUÑO -> cierra la mano para invocarla al instante
       if (katana.summonMode === "fist" && now > katana.drawCooldownUntil) {
-        setStatus("Cierra un puño para empuñar · Abre palma para guardar");
+        setStatus("Cierra el puño para empuñar · Abre toda la palma para guardar");
         for (let s = 0; s < 2; s++) {
           const slot = katana.hands[s];
-          if (slot.active && slot.isFist && slot.fistSince > 0 && now - slot.fistSince > 110) {
+          if (slot.active && slot.isFist && slot.fistSince > 0 && now - slot.fistSince > 90) {
             katana.state = "HELD";
             katana.heldSlot = s;
             katana.heldSince = now;
+            katana.lostSince = 0;
             katana.x = slot.x;
             katana.y = slot.y;
             katana.angle = slot.angle;
-            katana.angVel = 0;
             katana.materialize = 0.08;
             katana.tilt = slot.tilt;
             katana.soriSign = computeSoriSign(slot.rawHand, slot.angle);
             updateKatanaDimensions(slot.fistW, cw, ch, true);
             slot.peakUpVy = 0;
+            playIgniteSfx();
             katana.ripples.push({ x: slot.x, y: slot.y, r: 8, maxR: 62, alpha: 0.9, color: KATANA_SKINS[katana.skinIndex].glowRGB });
             break;
           }
@@ -1105,8 +1262,9 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
       } else if (!sHand.active) {
         if (katana.drawProgress >= 0.7) {
           katana.state = "HELD"; katana.heldSlot = katana.handleSlot;
-          katana.heldSince = now; katana.angVel = 0; katana.materialize = 1;
+          katana.heldSince = now; katana.lostSince = 0; katana.materialize = 1;
           hHand.peakUpVy = 0;
+          playIgniteSfx();
         } else resetKatana();
       } else {
         const dx = sHand.x - hHand.x, dy = sHand.y - hHand.y;
@@ -1128,8 +1286,9 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
           drawHandOcclusionAndLight(ctx, hHand, cw, ch);
           if (katana.drawProgress >= 0.94) {
             katana.state = "HELD"; katana.heldSlot = katana.handleSlot;
-            katana.heldSince = now; katana.angVel = 0; katana.materialize = 1;
+            katana.heldSince = now; katana.lostSince = 0; katana.materialize = 1;
             katana.transferCooldownUntil = now + 500; hHand.peakUpVy = 0;
+            playIgniteSfx();
             katana.ripples.push({ x: sHand.x, y: sHand.y, r: 8, maxR: 64, alpha: 0.9, color: KATANA_SKINS[katana.skinIndex].glowRGB });
           }
         } else {
@@ -1141,21 +1300,37 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
       const otherIdx = 1 - katana.heldSlot;
       const other = katana.hands[otherIdx];
 
-      katana.materialize = Math.min(1, katana.materialize + dt * 4.2);
+      katana.materialize = Math.min(1, katana.materialize + dt * 4.8);
 
+      // Si el movimiento rápido desenfoca la mano, aguantamos 650 ms con inercia antes de soltar
       if (!curSlot.active) {
-        if (katana.summonMode === "fist") {
-          resetKatana();
+        if (!katana.lostSince) katana.lostSince = now;
+        const lostMs = now - katana.lostSince;
+        if (lostMs < 650) {
+          katana.x += katana.vx * dt * 0.45;
+          katana.y += katana.vy * dt * 0.45;
+          katana.vx *= 0.88;
+          katana.vy *= 0.88;
+          drawSlashTrailAndSparks(ctx, now, dt);
+          drawKatanaBody(
+            ctx,
+            katana.x, katana.y, katana.angle,
+            katana.handleLen, katana.tsubaOffset,
+            katana.fullBladeLen * katana.materialize,
+            Math.max(0.25, 1 - lostMs / 750),
+            now, katana.soriSign, katana.tilt
+          );
         } else {
-          katana.state = "AIRBORNE"; katana.releaseTime = now;
-          katana.releasedBySlot = katana.heldSlot; katana.heldSlot = -1;
-          katana.vx = 0; katana.vy = -80; katana.vAngle = 1.6;
+          resetKatana();
         }
       } else {
+        katana.lostSince = 0;
+
+        // Cambio de mano intencionado (solo si acercas el otro puño)
         let transferred = false;
         if (other.active && now > katana.transferCooldownUntil && (now - katana.heldSince > 350)) {
           if (Math.hypot(other.x - katana.x, other.y - katana.y) < Math.max(76, other.scale * 1.15) &&
-              (other.justFisted || (other.isFist && curSlot.isOpen))) {
+              (other.justFisted || (other.isFist && curSlot.isWideOpen))) {
             katana.heldSlot = otherIdx; katana.heldSince = now;
             katana.transferCooldownUntil = now + 550; other.peakUpVy = 0;
             katana.ripples.push({ x: other.x, y: other.y, r: 8, maxR: 54, alpha: 0.9, color: "56,189,248" });
@@ -1166,40 +1341,45 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
         if (!transferred) {
           const vel = getSlotVel(curSlot);
           const holdAge = now - katana.heldSince;
-          const strongUp = vel.vy < -Math.max(540, ch * 0.68);
-          const openUp = curSlot.isOpen && vel.vy < -Math.max(380, ch * 0.46);
-          const snapUp = curSlot.peakUpVy < -Math.max(480, ch * 0.58) && (now - curSlot.peakUpTime < 140) && vel.vy > curSlot.peakUpVy * 0.35;
 
-          if (holdAge > 380 && (strongUp || openUp || snapUp)) {
+          // REGLA ESTRICTA: con el puño cerrado JAMÁS se suelta ni se lanza
+          const intentionalThrow =
+            katana.throwEnabled &&
+            !curSlot.isFist &&
+            curSlot.isOpen &&
+            holdAge > 400 &&
+            vel.vy < -Math.max(420, ch * 0.50);
+
+          if (intentionalThrow) {
             katana.state = "AIRBORNE"; katana.releaseTime = now;
             katana.releasedBySlot = katana.heldSlot; katana.heldSlot = -1;
-            const bestUp = Math.min(vel.vy, curSlot.peakUpVy || vel.vy);
-            katana.vy = Math.min(-340, Math.max(-680, bestUp * 0.72));
+            katana.vy = Math.min(-340, Math.max(-680, vel.vy * 0.72));
             katana.vx = Math.max(-340, Math.min(340, vel.vx * 0.5));
-            const spin = Math.abs(katana.angVel) > 1.2 ? katana.angVel * 0.45 : (katana.vx >= 0 ? 2.4 : -2.4);
-            katana.vAngle = Math.max(-3.8, Math.min(3.8, spin));
+            katana.vAngle = katana.vx >= 0 ? 2.6 : -2.6;
             curSlot.peakUpVy = 0;
-          } else if (katana.summonMode === "fist" && curSlot.isOpen && curSlot.openSince > 0 && now - curSlot.openSince > 620) {
-            // En modo 1 puño, abrir la palma relajada guarda la katana para liberar clics UI
+          } else if (katana.summonMode === "fist" && !curSlot.isFist && curSlot.isWideOpen && curSlot.openSince > 0 && now - curSlot.openSince > 750) {
+            // Solo se guarda si abres los 4 dedos bien estirados durante 0.75 s
             resetKatana();
           } else {
-            katana.x = curSlot.x; katana.y = curSlot.y;
+            // Seguimiento rígido sin muelle flojo -> pegada al puño en todo momento
+            katana.vx = vel.vx;
+            katana.vy = vel.vy;
+            katana.x = curSlot.x;
+            katana.y = curSlot.y;
             katana.tilt = curSlot.tilt;
+
             if (curSlot.hasAngle) {
-              // Muelle rápido y firme para que el mango no resbale fuera del puño ocluido
               const diff = shortestAngleDiff(katana.angle, curSlot.angle);
-              katana.angVel += (diff * 290 - katana.angVel * 32) * dt;
-              katana.angVel = Math.max(-13, Math.min(13, katana.angVel));
-              katana.angle += katana.angVel * dt;
+              katana.angle += diff * 0.62;
             }
             katana.soriSign = computeSoriSign(curSlot.rawHand, katana.angle);
             updateKatanaDimensions(curSlot.fistW, cw, ch, false);
 
             setStatus(curSlot.isFist
-              ? "Empuñada · Tira arriba para lanzar"
-              : "Cierra el puño para oclusión · Mantén palma abierta para guardar");
+              ? "Puño bloqueado · Corta libremente"
+              : "Abre bien la palma 1s para guardar");
 
-            drawSlashTrail(ctx, now);
+            drawSlashTrailAndSparks(ctx, now, dt);
             drawKatanaBody(
               ctx,
               katana.x, katana.y, katana.angle,
@@ -1232,8 +1412,8 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
         const slot = katana.hands[s];
         if (!slot.active || elapsed < (s === katana.releasedBySlot ? 420 : 110)) continue;
         if (distPointToSegment(slot.x, slot.y, katana.x, katana.y, midX, midY) < Math.max(92, slot.scale * 1.45)) {
-          katana.state = "HELD"; katana.heldSlot = s; katana.heldSince = now;
-          katana.x = slot.x; katana.y = slot.y; katana.angVel = katana.vAngle * 0.35;
+          katana.state = "HELD"; katana.heldSlot = s; katana.heldSince = now; katana.lostSince = 0;
+          katana.x = slot.x; katana.y = slot.y;
           katana.transferCooldownUntil = now + 450; slot.peakUpVy = 0;
           katana.ripples.push({ x: slot.x, y: slot.y, r: 10, maxR: 70, alpha: 0.95, color: KATANA_SKINS[katana.skinIndex].glowRGB });
           caught = true; break;
@@ -1242,7 +1422,7 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
 
       if (!caught) {
         setStatus("En el aire · Acerca una mano para atraparla");
-        drawSlashTrail(ctx, now);
+        drawSlashTrailAndSparks(ctx, now, dt);
         drawKatanaBody(
           ctx,
           katana.x, katana.y, katana.angle,
@@ -1499,8 +1679,8 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
     createWindow({
       title: "AR Lab · 3D",
       appId: "ar",
-      w: 295,
-      h: 285,
+      w: 298,
+      h: 295,
       buildContent(body) {
         body.innerHTML = `
           <div class="cfgGroup">
@@ -1518,8 +1698,9 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
               <button class="miniBtn active arSkinBtn">SKIN: ${KATANA_SKINS[katana.skinIndex].name}</button>
               <button class="miniBtn ${katana.reverseGrip ? "active" : ""} arGripBtn">AGARRE: ${katana.reverseGrip ? "INVERTIDO" : "NORMAL"}</button>
               <button class="miniBtn ${katana.summonMode === "fist" ? "active" : ""} arSummonBtn">${katana.summonMode === "fist" ? "1 PUÑO" : "2 PUÑOS"}</button>
+              <button class="miniBtn ${katana.throwEnabled ? "active" : ""} arThrowBtn">LANZAR: ${katana.throwEnabled ? "ON" : "OFF"}</button>
               <button class="miniBtn ${katana.occlusion ? "active" : ""} arOccBtn">OCLUSIÓN: ${katana.occlusion ? "ON" : "OFF"}</button>
-              <button class="miniBtn ${katana.slowMo ? "active" : ""} arSlowBtn">SLOW: ${katana.slowMo ? "ON" : "OFF"}</button>
+              <button class="miniBtn ${katana.sound ? "active" : ""} arSfxBtn">SONIDO: ${katana.sound ? "ON" : "OFF"}</button>
               <button class="miniBtn arResetBtn">GUARDAR</button>
             </div>
           </div>
@@ -1531,8 +1712,9 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
         const skinBtn = body.querySelector(".arSkinBtn");
         const gripBtn = body.querySelector(".arGripBtn");
         const summonBtn = body.querySelector(".arSummonBtn");
+        const throwBtn = body.querySelector(".arThrowBtn");
         const occBtn = body.querySelector(".arOccBtn");
-        const slowBtn = body.querySelector(".arSlowBtn");
+        const sfxBtn = body.querySelector(".arSfxBtn");
 
         statusListener = (txt) => { statusBox.textContent = txt; };
 
@@ -1554,7 +1736,6 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
           katana.reverseGrip = !katana.reverseGrip;
           gripBtn.classList.toggle("active", katana.reverseGrip);
           gripBtn.textContent = `AGARRE: ${katana.reverseGrip ? "INVERTIDO" : "NORMAL"}`;
-          // Voltea instantáneamente el ángulo actual si ya está empuñada
           katana.angle += Math.PI;
           for (const slot of katana.hands) {
             if (slot.hasAngle) {
@@ -1572,16 +1753,23 @@ export function createARModules({ APPS, createWindow, ensureHandsEnabled, bgCanv
           resetKatana();
         });
 
+        throwBtn.addEventListener("click", () => {
+          katana.throwEnabled = !katana.throwEnabled;
+          throwBtn.classList.toggle("active", katana.throwEnabled);
+          throwBtn.textContent = `LANZAR: ${katana.throwEnabled ? "ON" : "OFF"}`;
+        });
+
         occBtn.addEventListener("click", () => {
           katana.occlusion = !katana.occlusion;
           occBtn.classList.toggle("active", katana.occlusion);
           occBtn.textContent = `OCLUSIÓN: ${katana.occlusion ? "ON" : "OFF"}`;
         });
 
-        slowBtn.addEventListener("click", () => {
-          katana.slowMo = !katana.slowMo;
-          slowBtn.classList.toggle("active", katana.slowMo);
-          slowBtn.textContent = `SLOW: ${katana.slowMo ? "ON" : "OFF"}`;
+        sfxBtn.addEventListener("click", () => {
+          katana.sound = !katana.sound;
+          if (katana.sound) unlockAudio();
+          sfxBtn.classList.toggle("active", katana.sound);
+          sfxBtn.textContent = `SONIDO: ${katana.sound ? "ON" : "OFF"}`;
         });
 
         body.querySelector(".arResetBtn").addEventListener("click", () => {
